@@ -5,11 +5,13 @@ Aplikasi Next.js untuk mengelola video upload ke berbagai platform streaming den
 ## Fitur
 
 - 🔐 Authentication (Login)
-- 📁 Folder Management
-- 📹 Video Upload dengan integrasi Lixstream API
+- 📁 Folder Management dengan nested folders
+- 📹 Video Upload (Local & Remote) dengan integrasi Lixstream API
 - 📋 List Video dengan thumbnail
-- 📱 Auto Posting ke Telegram Channel dan X.com
+- 📱 Auto Posting ke Telegram Channel
 - 💾 SQLite Database untuk data lokal
+- 👥 Role Management (Superuser & Publisher)
+- 🔗 Video & Folder Sharing
 - 📱 Responsive Mobile Design
 
 ## Setup
@@ -38,9 +40,20 @@ npm run dev
 - Username: `admin`
 - Password: `admin123`
 
+## Scripts
+
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run start` - Start production server
+- `npm run lint` - Run ESLint
+- `npm run reset-db` - Reset database (hapus semua data kecuali users)
+- `npm run add-superuser` - Tambah superuser baru
+
 ## Environment Variables
 
 Lihat `.env.example` untuk daftar lengkap environment variables yang diperlukan.
+
+**Catatan:** Untuk production, semua API keys bisa di-set melalui Settings page di aplikasi (superuser), tidak perlu environment variables.
 
 ### Lixstream API
 - `LIXSTREAM_API_KEY` - API Key dari Lixstream
@@ -52,24 +65,34 @@ Lihat `.env.example` untuk daftar lengkap environment variables yang diperlukan.
 ### Telegram (untuk auto posting)
 - `TELEGRAM_BOT_TOKEN` - Token bot Telegram
 - `TELEGRAM_CHANNEL_ID` - ID channel Telegram
-
-### X.com / Twitter (untuk auto posting)
-- `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`
-
-### Thumbnail Upload
-Pilih salah satu:
-- **ImgBB** (Gratis): Set `IMGBB_API_KEY`
-- **Cloudinary** (Free tier): Set `CLOUDINARY_UPLOAD_URL` dan `CLOUDINARY_UPLOAD_PRESET`
+- `TELEGRAM_CHANNEL_NAME` - Nama channel Telegram
 
 ## Struktur Database
 
 Database SQLite akan otomatis dibuat di `data/stream-ops.db` saat pertama kali aplikasi dijalankan.
 
 Tables:
-- `users` - Data pengguna
-- `folders` - Folder untuk organisasi video
+- `users` - Data pengguna dengan role (superuser/publisher)
+- `folders` - Folder untuk organisasi video (nested structure)
 - `videos` - Data video yang diupload
 - `posts` - Data posting ke social media
+- `settings` - Konfigurasi aplikasi (API keys, dll)
+- `video_shares` - Sharing video ke publisher
+- `folder_shares` - Sharing folder ke publisher
+- `deleted_videos` - Daftar video yang sudah dihapus (untuk filter)
+
+## Deployment
+
+### ⚠️ Catatan Penting untuk Vercel
+
+Project ini menggunakan **SQLite file-based** yang **TIDAK kompatibel** dengan Vercel karena serverless functions yang stateless.
+
+**Solusi:**
+1. **Railway** atau **Render** (Recommended) - Mendukung persistent storage
+2. **Vercel + Supabase** - Migrate ke PostgreSQL
+3. **Vercel + Vercel Postgres** - Menggunakan database Vercel
+
+Lihat `DEPLOYMENT.md` untuk panduan lengkap deployment.
 
 ## Teknologi
 
@@ -79,9 +102,11 @@ Tables:
 - Tailwind CSS
 - Axios
 - JWT untuk authentication
+- Lucide React untuk icons
 
 ## Catatan
 
-- Pastikan untuk mengubah `JWT_SECRET` di production
-- Database SQLite disimpan di folder `data/`
-- Thumbnail upload memerlukan konfigurasi ImgBB atau Cloudinary
+- Database file (`*.db`) tidak di-commit ke Git (sudah di-ignore)
+- Environment variables tidak di-commit (sudah di-ignore)
+- Pastikan setup environment variables sebelum deploy
+- Untuk production, semua API keys bisa di-set melalui Settings page di aplikasi (superuser)
