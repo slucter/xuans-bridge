@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { getSetting, setSetting, getAllSettings } from '@/lib/settings';
+import { queryAll, execute } from '@/lib/pgdb';
 
 // Get all settings (superuser only)
 export async function GET(request: NextRequest) {
@@ -15,16 +15,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Forbidden - Superuser access required' }, { status: 403 });
   }
 
-  const settings = getAllSettings();
-  
-  // Include fallback values from env
+  // Read settings from Postgres (fallback to env if missing)
+  const rows = await queryAll<{ key: string; value: string }>('SELECT key, value FROM settings');
+  const map: Record<string, string> = {};
+  rows.forEach((r) => (map[r.key] = r.value));
+
   return NextResponse.json({
     settings: {
-      lixstream_api_key: settings.lixstream_api_key || process.env.LIXSTREAM_API_KEY || '',
-      lixstream_api_url: settings.lixstream_api_url || process.env.LIXSTREAM_API_URL || 'https://api.luxsioab.com/pub/api',
-      telegram_bot_token: settings.telegram_bot_token || process.env.TELEGRAM_BOT_TOKEN || '',
-      telegram_channel_id: settings.telegram_channel_id || process.env.TELEGRAM_CHANNEL_ID || '',
-      telegram_channel_name: settings.telegram_channel_name || process.env.TELEGRAM_CHANNEL_NAME || '',
+      lixstream_api_key: map.lixstream_api_key || process.env.LIXSTREAM_API_KEY || '',
+      lixstream_api_url: map.lixstream_api_url || process.env.LIXSTREAM_API_URL || 'https://api.luxsioab.com/pub/api',
+      telegram_bot_token: map.telegram_bot_token || process.env.TELEGRAM_BOT_TOKEN || '',
+      telegram_channel_id: map.telegram_channel_id || process.env.TELEGRAM_CHANNEL_ID || '',
+      telegram_channel_name: map.telegram_channel_name || process.env.TELEGRAM_CHANNEL_NAME || '',
     },
   });
 }
@@ -51,21 +53,24 @@ export async function PUT(request: NextRequest) {
       telegram_channel_name,
     } = await request.json();
 
-    if (lixstream_api_key !== undefined) {
-      setSetting('lixstream_api_key', lixstream_api_key || null);
-    }
-    if (lixstream_api_url !== undefined) {
-      setSetting('lixstream_api_url', lixstream_api_url || null);
-    }
-    if (telegram_bot_token !== undefined) {
-      setSetting('telegram_bot_token', telegram_bot_token || null);
-    }
-    if (telegram_channel_id !== undefined) {
-      setSetting('telegram_channel_id', telegram_channel_id || null);
-    }
-    if (telegram_channel_name !== undefined) {
-      setSetting('telegram_channel_name', telegram_channel_name || null);
-    }
+    // Upsert into Postgres settings table
+    const upsert = async (key: string, value: string | null | undefined) => {
+      if (value === undefined) return; // skip if not provided
+      if (value === null || value === '') {
+        await execute('DELETE FROM settings WHERE key = $1', [key]);
+      } else {
+        await execute(
+          'INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()',
+          [key, value]
+        );
+      }
+    };
+
+    await upsert('lixstream_api_key', lixstream_api_key ?? null);
+    await upsert('lixstream_api_url', lixstream_api_url ?? null);
+    await upsert('telegram_bot_token', telegram_bot_token ?? null);
+    await upsert('telegram_channel_id', telegram_channel_id ?? null);
+    await upsert('telegram_channel_name', telegram_channel_name ?? null);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
