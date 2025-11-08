@@ -11,10 +11,13 @@ export default function VideosPage() {
   const [user, setUser] = useState<User | null>(null);
   const [loadingVideos, setLoadingVideos] = useState(true);
   const [loadingUser, setLoadingUser] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+  const [totalPages, setTotalPages] = useState(1);
 
   useEffect(() => {
-    // Always load all videos without folder filter, sorted by date (newest first)
-    loadAllVideos();
+    // Load first page
+    loadVideos(1);
     loadUser();
   }, []);
 
@@ -32,19 +35,17 @@ export default function VideosPage() {
     }
   };
 
-  const loadAllVideos = async () => {
+  const loadVideos = async (targetPage: number) => {
     setLoadingVideos(true);
     try {
-      // Load all videos without folder filter
-      const response = await axios.get('/api/videos');
-      const allVideos = response.data.videos || [];
-      // Sort by created_at descending (newest first)
-      const sortedVideos = allVideos.sort((a: Video, b: Video) => {
-        const dateA = new Date(a.created_at).getTime();
-        const dateB = new Date(b.created_at).getTime();
-        return dateB - dateA;
+      const response = await axios.get('/api/videos', {
+        params: { page: targetPage, page_size: pageSize },
       });
-      setVideos(sortedVideos);
+      const pageVideos = response.data.videos || [];
+      setVideos(pageVideos);
+      const meta = response.data.pagination || { total_pages: 1 };
+      setTotalPages(meta.total_pages || 1);
+      setPage(targetPage);
     } catch (error) {
       console.error('Failed to load videos:', error);
     } finally {
@@ -62,8 +63,13 @@ export default function VideosPage() {
         videos={videos}
         selectedFolder={null} // Always null - no folder filter
         onFolderSelect={() => {}} // No-op since we don't want folder selection here
-        onRefresh={loadAllVideos}
+        onRefresh={() => loadVideos(page)}
         user={user || undefined}
+        pagination={{ page, totalPages, pageSize }}
+        onPageChange={(p) => {
+          if (p < 1 || p > totalPages) return;
+          loadVideos(p);
+        }}
       />
     </div>
   );

@@ -20,6 +20,8 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const folderIdParam = searchParams.get('folder_id');
+  const pageParam = searchParams.get('page');
+  const pageSizeParam = searchParams.get('page_size');
   
   // Handle special case for root folder (folder_id=root means folder_id IS NULL)
   let folderId: number | null | undefined;
@@ -33,7 +35,7 @@ export async function GET(request: NextRequest) {
   // Fetch latest role from DB to avoid stale JWT after role change
   const dbUser = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [user.id]);
   const effectiveRole = dbUser?.role || user.role || 'publisher';
-  console.log('[GET /api/videos] User role:', effectiveRole, 'folderIdParam:', folderIdParam, 'resolved folderId:', folderId);
+  console.log('[GET /api/videos] User role:', effectiveRole, 'folderIdParam:', folderIdParam, 'resolved folderId:', folderId, 'page:', pageParam, 'page_size:', pageSizeParam);
 
   // Superuser can see all videos from Lixstream API directly
   // Publisher only sees their own videos from local database
@@ -354,8 +356,18 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  console.log('[GET /api/videos] End request, total videos:', Array.isArray(videos) ? videos.length : 0);
-  return NextResponse.json({ videos });
+  // Apply pagination
+  const page = Math.max(1, parseInt(pageParam || '1', 10) || 1);
+  const pageSize = Math.max(1, parseInt(pageSizeParam || '15', 10) || 15);
+  const total = Array.isArray(videos) ? videos.length : 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const startIndex = Math.min((page - 1) * pageSize, total);
+  const pagedVideos = Array.isArray(videos) ? videos.slice(startIndex, startIndex + pageSize) : [];
+  console.log('[GET /api/videos] End request, total:', total, 'page:', page, 'pageSize:', pageSize, 'returned:', pagedVideos.length);
+  return NextResponse.json({ 
+    videos: pagedVideos,
+    pagination: { page, page_size: pageSize, total, total_pages: totalPages }
+  });
 }
 
 export async function POST(request: NextRequest) {

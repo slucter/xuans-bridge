@@ -11,6 +11,8 @@ interface VideoListProps {
   onFolderSelect: (folder: Folder | null) => void;
   onRefresh: () => void;
   user?: User;
+  pagination?: { page: number; totalPages: number; pageSize: number };
+  onPageChange?: (page: number) => void;
 }
 
 export default function VideoList({
@@ -19,6 +21,8 @@ export default function VideoList({
   onFolderSelect,
   onRefresh,
   user,
+  pagination,
+  onPageChange,
 }: VideoListProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showShareModal, setShowShareModal] = useState(false);
@@ -282,6 +286,42 @@ export default function VideoList({
     );
   });
 
+  // Pagination helpers (data already paginated by backend)
+  const currentPage = pagination?.page ?? 1;
+  const totalPages = pagination?.totalPages ?? 1;
+  const canPrev = currentPage > 1;
+  const canNext = currentPage < totalPages;
+
+  const buildPageItems = (current: number, total: number): (number | '...')[] => {
+    const items: (number | '...')[] = [];
+    if (total <= 7) {
+      for (let i = 1; i <= total; i++) items.push(i);
+      return items;
+    }
+    const showCount = 4;
+    if (current <= showCount) {
+      for (let i = 1; i <= showCount; i++) items.push(i);
+      items.push('...');
+      items.push(total);
+      return items;
+    }
+    if (current >= total - showCount + 1) {
+      items.push(1);
+      items.push('...');
+      for (let i = total - showCount + 1; i <= total; i++) items.push(i);
+      return items;
+    }
+    items.push(1);
+    items.push('...');
+    items.push(current - 1);
+    items.push(current);
+    items.push(current + 1);
+    items.push('...');
+    items.push(total);
+    return items;
+  };
+  const pageItems = buildPageItems(currentPage, totalPages);
+
   return (
     <div className="h-full flex flex-col bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700">
       {/* Header */}
@@ -502,6 +542,45 @@ export default function VideoList({
             </table>
         )}
       </div>
+
+      {/* Pagination */}
+      {pagination && totalPages > 1 && (
+        <div className="p-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-center gap-2">
+          <button
+            onClick={() => onPageChange && onPageChange(currentPage - 1)}
+            disabled={!canPrev}
+            className="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 disabled:opacity-50"
+          >
+            Prev
+          </button>
+          {pageItems.map((item, idx) =>
+            item === '...'
+              ? (
+                  <span key={idx} className="px-2 text-gray-500">...</span>
+                )
+              : (
+                  <button
+                    key={idx}
+                    onClick={() => onPageChange && onPageChange(item as number)}
+                    className={`px-3 py-1.5 text-sm rounded border ${
+                      item === currentPage
+                        ? 'border-blue-600 bg-blue-600 text-white'
+                        : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200'
+                    }`}
+                  >
+                    {item}
+                  </button>
+                )
+          )}
+          <button
+            onClick={() => onPageChange && onPageChange(currentPage + 1)}
+            disabled={!canNext}
+            className="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      )}
 
       {/* Share Modal */}
       {showShareModal && user?.role === 'superuser' && (

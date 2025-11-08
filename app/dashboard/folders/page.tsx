@@ -15,21 +15,26 @@ export default function FoldersPage() {
   const [loadingFolders, setLoadingFolders] = useState(true);
   const [loadingVideos, setLoadingVideos] = useState(true);
   const [loadingUser, setLoadingUser] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+  const [totalPages, setTotalPages] = useState(1);
 
   useEffect(() => {
     loadFolders();
     loadUser();
-    // Load all videos initially (when no folder selected)
-    loadVideos();
+    // Load first page of all videos initially (when no folder selected)
+    loadVideos(undefined, 1);
   }, []);
 
   useEffect(() => {
     if (selectedFolder !== null) {
       // If folder.id is null, it's the Root folder
-      loadVideos(selectedFolder.id === null ? null : selectedFolder.id);
+      setPage(1);
+      loadVideos(selectedFolder.id === null ? null : selectedFolder.id, 1);
     } else {
       // Load all videos when no folder selected
-      loadVideos();
+      setPage(1);
+      loadVideos(undefined, 1);
     }
   }, [selectedFolder?.id]);
 
@@ -59,16 +64,18 @@ export default function FoldersPage() {
     }
   };
 
-  const loadVideos = async (folderId?: number | null) => {
+  const loadVideos = async (folderId?: number | null, targetPage?: number) => {
     setLoadingVideos(true);
     try {
-      const url = folderId === null
-        ? '/api/videos?folder_id=root'
-        : folderId
-        ? `/api/videos?folder_id=${folderId}`
-        : '/api/videos';
-      const response = await axios.get(url);
-      setVideos(response.data.videos || []);
+      const params: any = { page: targetPage ?? page, page_size: pageSize };
+      if (folderId === null) params.folder_id = 'root';
+      if (typeof folderId === 'number') params.folder_id = folderId;
+      const response = await axios.get('/api/videos', { params });
+      const pageVideos = response.data.videos || [];
+      setVideos(pageVideos);
+      const meta = response.data.pagination || { total_pages: 1 };
+      setTotalPages(meta.total_pages || 1);
+      if (targetPage) setPage(targetPage);
     } catch (error) {
       console.error('Failed to load videos:', error);
     } finally {
@@ -142,15 +149,28 @@ export default function FoldersPage() {
             onRefresh={() => {
               if (selectedFolder) {
                 if (selectedFolder.id === null) {
-                  loadVideos(null);
+                  loadVideos(null, page);
                 } else {
-                  loadVideos(selectedFolder.id);
+                  loadVideos(selectedFolder.id, page);
                 }
               } else {
-                loadVideos();
+                loadVideos(undefined, page);
               }
             }}
             user={user || undefined}
+            pagination={{ page, totalPages, pageSize }}
+            onPageChange={(p) => {
+              if (p < 1 || p > totalPages) return;
+              if (selectedFolder) {
+                if (selectedFolder.id === null) {
+                  loadVideos(null, p);
+                } else {
+                  loadVideos(selectedFolder.id, p);
+                }
+              } else {
+                loadVideos(undefined, p);
+              }
+            }}
           />
         )}
       </div>
