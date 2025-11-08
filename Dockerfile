@@ -36,8 +36,8 @@ RUN apk add --no-cache sqlite-libs
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy necessary files
-COPY --from=builder /app/public ./public
+# Copy necessary files (handle projects without a public directory)
+# Note: some projects may not have /public; we only copy Next.js build outputs
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
