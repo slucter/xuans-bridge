@@ -141,8 +141,10 @@ export async function GET(request: NextRequest) {
         if (!folderName || !localFolderId) {
           console.warn(`❌ File "${file.name || file.title}" has dir_id "${file.dir_id}" (normalized: "${normalizedDirId}") but folder not found in local database`);
           console.warn(`Available folders in map:`, Array.from(folderMapByName.entries()).map(([dirId, name]) => ({ dirId, name })));
-          // Set folder_name to null - frontend should handle this appropriately
-          // Don't set to Root if folder exists in Lixstream but not in local DB
+          // Important: if dir_id exists but we can't map to local DB, set a placeholder name
+          // This prevents UI from showing it as Root despite having a folder on Lixstream
+          folderName = '(Unmapped Folder)';
+          // Keep localFolderId as null since we don't have a local folder record
         } else {
           console.log(`✓ Matched file "${file.name || file.title}" to folder "${folderName}" (dir_id: ${file.dir_id}, local_folder_id: ${localFolderId})`);
         }
@@ -344,7 +346,8 @@ export async function GET(request: NextRequest) {
             (file.share_link ? file.share_link.match(/\/s\/([^\/\?]+)/)?.[1] : null) ||
             (file.embed_link ? file.embed_link.match(/\/e\/([^\/\?]+)/)?.[1] : null);
           
-          const folderName = file.dir_id ? folderMap.get(file.dir_id) || null : 'Root';
+          // If dir_id exists but not mapped, use placeholder to avoid displaying as Root
+          const folderName = file.dir_id ? folderMap.get(file.dir_id) || '(Unmapped Folder)' : 'Root';
           const localFolder = allFolders.find((f) => f.lixstream_dir_id === file.dir_id);
 
           return {
