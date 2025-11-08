@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/pgdb';
 import { createUploadTask, confirmUpload, getAllFilesFromLixstream, getFilesByDirFromLixstream } from '@/lib/lixstream';
+import { logActivity } from '@/lib/activity';
 
 export const runtime = 'nodejs';
 
@@ -440,6 +441,18 @@ export async function POST(request: NextRequest) {
     );
 
     const videoId = videoResult.lastInsertRowid;
+    // Log local upload task creation
+    await logActivity({
+      userId: user.id,
+      action: 'upload_local',
+      targetType: 'video',
+      targetId: videoId,
+      metadata: {
+        name: String(fileName),
+        folder_id: localFolderId,
+        lixstream_upload_id: uploadTask.data.id,
+      },
+    });
 
     return NextResponse.json({
       success: true,

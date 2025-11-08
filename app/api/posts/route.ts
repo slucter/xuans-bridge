@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/pgdb';
 import { getSettingAsync } from '@/lib/settings';
+import { logActivity } from '@/lib/activity';
 
 export async function POST(request: NextRequest) {
   const token = request.cookies.get('auth_token')?.value;
@@ -19,17 +20,19 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const title = formData.get('title') as string;
     const videoIdsStr = formData.get('videoIds') as string;
+    const linksStr = formData.get('links') as string | null;
     const postToTelegramStr = formData.get('postToTelegram') as string;
     const image = formData.get('image') as File | null;
     
     const videoIds = JSON.parse(videoIdsStr || '[]');
+    const extraLinks: string[] = JSON.parse(linksStr || '[]');
     const shouldPostToTelegram = postToTelegramStr === 'true';
 
-    if (!title || !videoIds || !Array.isArray(videoIds) || videoIds.length === 0) {
-      return NextResponse.json(
-        { error: 'Title and at least one video ID are required' },
-        { status: 400 }
-      );
+    if (!title) {
+      return NextResponse.json({ error: 'Title is required' }, { status: 400 });
+    }
+    if ((!videoIds || !Array.isArray(videoIds)) && (!extraLinks || !Array.isArray(extraLinks))) {
+      return NextResponse.json({ error: 'At least one video or link is required' }, { status: 400 });
     }
 
     // Convert videoIds to numbers and validate
@@ -44,15 +47,21 @@ export async function POST(request: NextRequest) {
     // Get video links from Postgres
     const idPlaceholders = videoIdsNumbers.map((_, idx) => `$${idx + 1}`).join(',');
     const queryParams = [...videoIdsNumbers, user.id];
-    const videos = await queryAll<any>(
+    const videos = videoIdsNumbers.length > 0 ? await queryAll<any>(
       `SELECT id, name, file_share_link, file_embed_link 
        FROM videos 
        WHERE id IN (${idPlaceholders}) AND user_id = $${videoIdsNumbers.length + 1}`,
       queryParams
-    );
+    ) : [];
 
-    if (videos.length === 0) {
-      return NextResponse.json({ error: 'No valid videos found' }, { status: 400 });
+    // Combine DB videos with extra links from client
+    const videosForPosting = [
+      ...videos,
+      ...extraLinks.map((l) => ({ id: null, name: 'Remote', file_share_link: l, file_embed_link: null })),
+    ];
+
+    if (videosForPosting.length === 0) {
+      return NextResponse.json({ error: 'No valid videos or links to post' }, { status: 400 });
     }
 
     // Save post to Postgres
@@ -83,7 +92,7 @@ export async function POST(request: NextRequest) {
         console.error('Telegram post error:', telegramError);
       } else {
         try {
-          telegramMessageId = await postToTelegram(title, videos, channelIdToUse, image);
+          telegramMessageId = await postToTelegram(title, videosForPosting, channelIdToUse, image);
           if (telegramMessageId) {
             await execute(
               'UPDATE posts SET telegram_posted = $1, telegram_message_id = $2 WHERE id = $3',
@@ -96,6 +105,22 @@ export async function POST(request: NextRequest) {
         }
       }
     }
+
+    // Log post creation
+    await logActivity({
+      userId: user.id,
+      action: 'create_post',
+      targetType: 'post',
+      targetId: postId,
+      metadata: {
+        title: String(title),
+        video_ids: videoIdsNumbers,
+        video_links: extraLinks,
+        telegram_posted: Boolean(telegramMessageId),
+        telegram_message_id: telegramMessageId || null,
+        telegram_error: telegramError || null,
+      },
+    });
 
     return NextResponse.json({
       success: true,

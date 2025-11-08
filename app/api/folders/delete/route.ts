@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/pgdb';
+import { logActivity } from '@/lib/activity';
 
 export const runtime = 'nodejs';
 
@@ -143,6 +144,18 @@ export async function DELETE(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Log folder deletion
+    await logActivity({
+      userId: user.id,
+      action: 'delete_folder',
+      targetType: 'folder',
+      targetId: folderIdNum,
+      metadata: {
+        deletedFolders: result.deletedFolders,
+        deletedVideos: result.deletedVideos,
+      },
+    });
 
     return NextResponse.json({
       success: true,

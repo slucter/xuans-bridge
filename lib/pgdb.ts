@@ -151,6 +151,17 @@ export async function initSchema(): Promise<void> {
         deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      -- Activity logs for auditing user actions
+      CREATE TABLE IF NOT EXISTS activity_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        action TEXT NOT NULL,
+        target_type TEXT,
+        target_id TEXT,
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE INDEX IF NOT EXISTS idx_videos_user_id ON videos(user_id);
       CREATE INDEX IF NOT EXISTS idx_videos_folder_id ON videos(folder_id);
       CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id);
@@ -160,6 +171,9 @@ export async function initSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_folder_shares_folder_id ON folder_shares(folder_id);
       CREATE INDEX IF NOT EXISTS idx_folder_shares_shared_to ON folder_shares(shared_to_user_id);
       CREATE INDEX IF NOT EXISTS idx_deleted_videos_file_id ON deleted_videos(lixstream_file_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_logs_action ON activity_logs(action);
+      CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);
     `);
 
     const res = await client.query('SELECT COUNT(*) AS count FROM users');
@@ -188,3 +202,10 @@ export default {
   execute,
   initSchema,
 };
+
+// Auto-initialize schema at startup (idempotent). Ensures tables exist in Neon/Postgres.
+// This runs once per server process; errors are logged but won't crash the app.
+initSchema().catch((err) => {
+  // eslint-disable-next-line no-console
+  console.error('[pgdb] initSchema error:', err);
+});

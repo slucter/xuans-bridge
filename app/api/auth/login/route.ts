@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { queryOne } from '@/lib/pgdb';
 import { createToken, setAuthCookie } from '@/lib/auth';
+import { logActivity } from '@/lib/activity';
 
 export const runtime = 'nodejs';
 
@@ -55,6 +56,14 @@ export async function POST(request: NextRequest) {
     });
 
     setAuthCookie(response, token);
+    // Log successful login
+    await logActivity({
+      userId: user.id,
+      action: 'login',
+      targetType: 'user',
+      targetId: user.id,
+      metadata: { username: user.username },
+    });
     return response;
   } catch (error) {
     console.error('Login error:', error);

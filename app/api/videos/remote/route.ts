@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/pgdb';
 import { remoteUpload } from '@/lib/lixstream';
+import { logActivity } from '@/lib/activity';
 
 export const runtime = 'nodejs';
 
@@ -114,6 +115,20 @@ export async function POST(request: NextRequest) {
 
     // Remote upload does not save to database
     // Superuser will see videos directly from Lixstream API
+
+    // Log remote upload task creation
+    await logActivity({
+      userId: user.id,
+      action: 'upload_remote',
+      targetType: 'remote_upload',
+      targetId: taskId,
+      metadata: {
+        url,
+        name,
+        folder_id: localFolderId,
+        dir_share_link: remoteUploadResponse.data.dir_share_link || null,
+      },
+    });
 
     return NextResponse.json({
       success: true,

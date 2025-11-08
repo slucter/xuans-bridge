@@ -101,6 +101,7 @@ export default function DashboardLayout({ children, user }: DashboardLayoutProps
             {[
               { id: 'folders', label: 'Home', path: '/dashboard/folders' },
               { id: 'videos', label: 'Video List', path: '/dashboard/videos' },
+              { id: 'stats', label: 'Stats', path: '/dashboard/stats' },
               { id: 'post', label: 'Posting', path: '/dashboard/post' },
               { id: 'profile', label: 'Profile', path: '/dashboard/profile' },
               ...(user.role === 'superuser' ? [{ id: 'master', label: 'Master', path: '/dashboard/master' }] : []),

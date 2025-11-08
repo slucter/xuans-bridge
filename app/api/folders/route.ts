@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/pgdb';
 import { createFolder as createLixstreamFolder } from '@/lib/lixstream';
+import { logActivity } from '@/lib/activity';
 
 export const runtime = 'nodejs';
 
@@ -142,6 +143,14 @@ export async function POST(request: NextRequest) {
       'INSERT INTO folders (user_id, name, parent_id, lixstream_dir_id) VALUES ($1, $2, $3, $4)',
       [user.id, name.trim(), normalizedParentId, lixstreamDirId]
     );
+    // Log folder creation
+    await logActivity({
+      userId: user.id,
+      action: 'create_folder',
+      targetType: 'folder',
+      targetId: result.lastInsertRowid,
+      metadata: { name: name.trim(), parent_id: normalizedParentId, lixstream_dir_id: lixstreamDirId },
+    });
 
     return NextResponse.json({
       success: true,

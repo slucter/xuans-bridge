@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { execute, queryOne } from '@/lib/pgdb';
+import { logActivity } from '@/lib/activity';
 
 export const runtime = 'nodejs';
 
@@ -118,6 +119,19 @@ export async function DELETE(request: NextRequest) {
         errors.push(`Failed to delete video ${videoId}: ${error.message}`);
       }
     }
+    // Log deletion activity (aggregate)
+    await logActivity({
+      userId: user.id,
+      action: 'delete_video',
+      targetType: 'video',
+      targetId: null,
+      metadata: {
+        video_ids,
+        deletedCount,
+        errors_count: errors.length,
+        role: user.role,
+      },
+    });
 
     return NextResponse.json({
       success: true,

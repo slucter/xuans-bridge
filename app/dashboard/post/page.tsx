@@ -18,7 +18,7 @@ export default function PostPage() {
     setLoading(true);
     try {
       // Load all videos without folder filter
-      const response = await axios.get('/api/videos');
+      const response = await axios.get('/api/videos?page_size=10000');
       const allVideos = response.data.videos || [];
       // Sort by created_at descending (newest first)
       const sortedVideos = allVideos.sort((a: Video, b: Video) => {

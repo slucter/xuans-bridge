@@ -14,7 +14,7 @@ interface FolderWithVideos extends Folder {
 
 export default function PostForm({ videos }: PostFormProps) {
   const [title, setTitle] = useState('');
-  const [selectedVideoIds, setSelectedVideoIds] = useState<number[]>([]);
+  const [selectedVideoIds, setSelectedVideoIds] = useState<Array<string | number>>([]);
   const [postImage, setPostImage] = useState<File | null>(null);
   const [postToTelegram, setPostToTelegram] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -28,8 +28,9 @@ export default function PostForm({ videos }: PostFormProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  // Only allow videos that exist in local database (numeric id)
-  const completedVideos = videos.filter((v) => v.upload_status === 'completed' && typeof (v as any).id === 'number');
+  // Allow all completed videos, regardless of local DB id presence
+  // Some videos may come from Lixstream (id string, links available)
+  const completedVideos = videos.filter((v) => v.upload_status === 'completed');
 
   useEffect(() => {
     // Fetch channel name from API
@@ -143,7 +144,7 @@ export default function PostForm({ videos }: PostFormProps) {
     });
   };
 
-  const toggleVideoSelection = (videoId: number) => {
+  const toggleVideoSelection = (videoId: string | number) => {
     setSelectedVideoIds((prev) =>
       prev.includes(videoId)
         ? prev.filter((id) => id !== videoId)
@@ -171,7 +172,18 @@ export default function PostForm({ videos }: PostFormProps) {
     try {
       const formData = new FormData();
       formData.append('title', title);
-      formData.append('videoIds', JSON.stringify(selectedVideoIds));
+      // Split into numeric IDs (local DB videos) and direct links (remote/shared videos)
+      const selectedVideos = completedVideos.filter((v) => selectedVideoIds.includes(v.id));
+      const numericIds = selectedVideos
+        .filter((v) => typeof (v as any).id === 'number')
+        .map((v) => v.id as unknown as number);
+      // Prefer embed links; fallback to share if embed not available
+      const links = selectedVideos
+        .map((v) => v.file_embed_link || v.file_share_link)
+        .filter((l): l is string => !!l);
+
+      formData.append('videoIds', JSON.stringify(numericIds));
+      formData.append('links', JSON.stringify(links));
       formData.append('postToTelegram', postToTelegram.toString());
       if (postImage) {
         formData.append('image', postImage);
@@ -211,8 +223,9 @@ export default function PostForm({ videos }: PostFormProps) {
     const selectedVideos = completedVideos.filter((v) =>
       selectedVideoIds.includes(v.id)
     );
+    // Prefer embed links; fallback to share if embed not available
     const links = selectedVideos
-      .map((v) => v.file_share_link || v.file_embed_link)
+      .map((v) => v.file_embed_link || v.file_share_link)
       .filter(Boolean);
 
     // Format according to new template:
@@ -523,9 +536,9 @@ interface FolderTreeItemProps {
   folder: FolderWithVideos;
   level: number;
   expandedFolders: Set<number>;
-  selectedVideoIds: number[];
+  selectedVideoIds: Array<string | number>;
   onToggleFolder: (folderId: number) => void;
-  onToggleVideo: (videoId: number) => void;
+  onToggleVideo: (videoId: string | number) => void;
   searchQuery?: string;
 }
 
@@ -544,15 +557,22 @@ function FolderTreeItem({
   const hasVideos = folder.videos && folder.videos.length > 0;
 
   // Filter videos based on search query
-  const filteredVideos = searchQuery
-    ? folder.videos?.filter((video) =>
-        video.name.toLowerCase().includes(searchQuery.toLowerCase())
-      ) || []
-    : folder.videos || [];
+  const folderNameMatches = searchQuery
+    ? folder.name.toLowerCase().includes(searchQuery.toLowerCase())
+    : false;
+  // If folder name matches the search, show all videos inside this folder
+  const filteredVideos = folderNameMatches
+    ? (folder.videos || [])
+    : (searchQuery
+        ? folder.videos?.filter((video) =>
+            video.name.toLowerCase().includes(searchQuery.toLowerCase())
+          ) || []
+        : folder.videos || []);
 
   // Filter children recursively based on search query
   const filterChildren = (children: Folder[]): FolderWithVideos[] => {
-    if (!searchQuery) return children as FolderWithVideos[];
+    // If folder name itself matches, show all children normally
+    if (!searchQuery || folderNameMatches) return children as FolderWithVideos[];
 
     return children.flatMap((child) => {
       const childWithVideos = child as FolderWithVideos;
