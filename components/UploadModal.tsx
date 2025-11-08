@@ -45,7 +45,8 @@ export default function UploadModal({
   const uploadFolderId = selectedFolder?.id || null;
 
   // Flatten folders for dropdown
-  const flattenFolders = (folders: Folder[], result: Folder[] = [], prefix: string = ''): Folder[] => {
+  type UIFolder = Folder & { displayName?: string };
+  const flattenFolders = (folders: Folder[], result: UIFolder[] = [], prefix: string = ''): UIFolder[] => {
     folders.forEach((folder) => {
       result.push({ ...folder, displayName: prefix + folder.name });
       if (folder.children && folder.children.length > 0) {
@@ -55,7 +56,7 @@ export default function UploadModal({
     return result;
   };
 
-  const allFoldersFlat = flattenFolders(folders);
+  const allFoldersFlat: UIFolder[] = flattenFolders(folders);
 
   const addFiles = useCallback((fileList: FileList | null) => {
     if (!fileList) return;

@@ -29,6 +29,7 @@ export default function RemoteUpload({
   onUploadSuccess,
   user,
 }: RemoteUploadProps) {
+  type UIFolder = Folder & { displayName?: string };
   const [urls, setUrls] = useState<string>('');
   const [uploadFolderId, setUploadFolderId] = useState<number | null>(selectedFolder?.id || null);
   const [uploadItems, setUploadItems] = useState<RemoteUploadItem[]>([]);
@@ -36,7 +37,7 @@ export default function RemoteUpload({
   const [showRules, setShowRules] = useState(false);
 
   // Flatten folders for dropdown
-  const flattenFolders = (folders: Folder[], result: Folder[] = [], prefix: string = ''): Folder[] => {
+  const flattenFolders = (folders: Folder[], result: UIFolder[] = [], prefix: string = ''): UIFolder[] => {
     folders.forEach((folder) => {
       result.push({ ...folder, displayName: prefix + folder.name });
       if (folder.children && folder.children.length > 0) {
@@ -46,7 +47,7 @@ export default function RemoteUpload({
     return result;
   };
 
-  const allFoldersFlat = flattenFolders(folders);
+  const allFoldersFlat: UIFolder[] = flattenFolders(folders);
 
   // Update uploadFolderId when selectedFolder changes
   useEffect(() => {
@@ -230,9 +231,9 @@ export default function RemoteUpload({
               className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white disabled:opacity-50"
             >
               <option value="">Root (All file)</option>
-              {allFoldersFlat.map((folder) => (
-                <option key={folder.id} value={folder.id}>
-                  {(folder as any).displayName || folder.path || folder.name}
+              {allFoldersFlat.filter((f) => f.id !== null).map((folder) => (
+                <option key={folder.id!} value={folder.id!}>
+                  {folder.displayName || folder.path || folder.name}
                 </option>
               ))}
             </select>

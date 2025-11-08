@@ -551,28 +551,26 @@ function FolderTreeItem({
   // Filter children recursively based on search query
   const filterChildren = (children: Folder[]): FolderWithVideos[] => {
     if (!searchQuery) return children as FolderWithVideos[];
-    
-    return children
-      .map((child) => {
-        const childWithVideos = child as FolderWithVideos;
-        const childMatches = child.name.toLowerCase().includes(searchQuery.toLowerCase());
-        const hasMatchingVideos = childWithVideos.videos?.some((video) =>
-          video.name.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-        const filteredChildChildren = childWithVideos.children
-          ? filterChildren(childWithVideos.children as Folder[])
-          : [];
-        const hasMatchingChildren = filteredChildChildren.length > 0;
-        
-        if (childMatches || hasMatchingVideos || hasMatchingChildren) {
-          return {
-            ...childWithVideos,
-            children: filteredChildChildren,
-          };
-        }
-        return null;
-      })
-      .filter((child): child is FolderWithVideos => child !== null);
+
+    return children.flatMap((child) => {
+      const childWithVideos = child as FolderWithVideos;
+      const childMatches = child.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const hasMatchingVideos = childWithVideos.videos?.some((video) =>
+        video.name.toLowerCase().includes(searchQuery.toLowerCase())
+      ) || false;
+      const filteredChildChildren = childWithVideos.children
+        ? filterChildren(childWithVideos.children as Folder[])
+        : [];
+      const hasMatchingChildren = filteredChildChildren.length > 0;
+
+      if (childMatches || hasMatchingVideos || hasMatchingChildren) {
+        return [{
+          ...childWithVideos,
+          children: filteredChildChildren,
+        }];
+      }
+      return [];
+    });
   };
 
   const filteredChildren = hasChildren ? filterChildren(folder.children!) : [];

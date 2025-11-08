@@ -30,6 +30,7 @@ export default function VideoUpload({
   onUploadSuccess,
   user,
 }: VideoUploadProps) {
+  type UIFolder = Folder & { displayName?: string };
   const [uploadType, setUploadType] = useState<'local' | 'remote'>('local');
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [uploadFolderId, setUploadFolderId] = useState<number | null>(selectedFolder?.id || null);
@@ -39,7 +40,7 @@ export default function VideoUpload({
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
   // Flatten folders for dropdown
-  const flattenFolders = (folders: Folder[], result: Folder[] = [], prefix: string = ''): Folder[] => {
+  const flattenFolders = (folders: Folder[], result: UIFolder[] = [], prefix: string = ''): UIFolder[] => {
     folders.forEach((folder) => {
       result.push({ ...folder, displayName: prefix + folder.name });
       if (folder.children && folder.children.length > 0) {
@@ -49,7 +50,7 @@ export default function VideoUpload({
     return result;
   };
 
-  const allFoldersFlat = flattenFolders(folders);
+  const allFoldersFlat: UIFolder[] = flattenFolders(folders);
 
   // Update uploadFolderId when selectedFolder changes
   useEffect(() => {
@@ -285,9 +286,9 @@ export default function VideoUpload({
             className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white disabled:opacity-50"
           >
             <option value="">Root (No Folder)</option>
-            {allFoldersFlat.map((folder) => (
-              <option key={folder.id} value={folder.id}>
-                {(folder as any).displayName || folder.path || folder.name}
+            {allFoldersFlat.filter((f) => f.id !== null).map((folder) => (
+              <option key={folder.id!} value={folder.id!}>
+                {folder.displayName || folder.path || folder.name}
               </option>
             ))}
           </select>
