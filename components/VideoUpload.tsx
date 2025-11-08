@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Folder } from '@/types';
+import { Folder, User } from '@/types';
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import RemoteUpload from './RemoteUpload';
 
@@ -11,7 +11,7 @@ interface VideoUploadProps {
   selectedFolder: Folder | null;
   onFolderSelect: (folder: Folder | null) => void;
   onUploadSuccess: () => void;
-  user?: { role: string };
+  user?: User;
 }
 
 interface UploadFile {

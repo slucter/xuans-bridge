@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Folder } from '@/types';
+import { Folder, User } from '@/types';
 import { Link, X, CheckCircle, AlertCircle, Loader2, Info } from 'lucide-react';
 
 interface RemoteUploadProps {
@@ -10,7 +10,7 @@ interface RemoteUploadProps {
   selectedFolder: Folder | null;
   onFolderSelect: (folder: Folder | null) => void;
   onUploadSuccess: () => void;
-  user?: { role: string };
+  user?: User;
 }
 
 interface RemoteUploadItem {

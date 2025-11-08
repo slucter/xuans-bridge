@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { Folder } from '@/types';
+import { Folder, User } from '@/types';
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import RemoteUpload from './RemoteUpload';
 
@@ -12,7 +12,7 @@ interface UploadModalProps {
   folders: Folder[];
   selectedFolder: Folder | null;
   onUploadSuccess: () => void;
-  user?: { role: string };
+  user?: User;
 }
 
 interface UploadFile {
