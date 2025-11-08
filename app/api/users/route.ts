@@ -12,7 +12,13 @@ export async function GET(request: NextRequest) {
   }
 
   const user = verifyToken(token);
-  if (!user || user.role !== 'superuser') {
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Fetch fresh role from DB to avoid stale token role
+  const dbUser = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [user.id]);
+  if (!dbUser || dbUser.role !== 'superuser') {
     return NextResponse.json({ error: 'Forbidden - Superuser access required' }, { status: 403 });
   }
 
@@ -32,7 +38,12 @@ export async function POST(request: NextRequest) {
   }
 
   const user = verifyToken(token);
-  if (!user || user.role !== 'superuser') {
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const dbUser = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [user.id]);
+  if (!dbUser || dbUser.role !== 'superuser') {
     return NextResponse.json({ error: 'Forbidden - Superuser access required' }, { status: 403 });
   }
 

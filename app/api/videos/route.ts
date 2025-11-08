@@ -30,12 +30,15 @@ export async function GET(request: NextRequest) {
   } else {
     folderId = undefined; // No folder filter
   }
-  console.log('[GET /api/videos] User role:', user.role, 'folderIdParam:', folderIdParam, 'resolved folderId:', folderId);
+  // Fetch latest role from DB to avoid stale JWT after role change
+  const dbUser = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [user.id]);
+  const effectiveRole = dbUser?.role || user.role || 'publisher';
+  console.log('[GET /api/videos] User role:', effectiveRole, 'folderIdParam:', folderIdParam, 'resolved folderId:', folderId);
 
   // Superuser can see all videos from Lixstream API directly
   // Publisher only sees their own videos from local database
   let videos;
-  if (user.role === 'superuser') {
+  if (effectiveRole === 'superuser') {
     // Fetch global files from Lixstream API (used to compute root files)
     const globalFiles = await getAllFilesFromLixstream();
     

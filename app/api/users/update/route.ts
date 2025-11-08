@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { execute } from '@/lib/pgdb';
+import { execute, queryOne } from '@/lib/pgdb';
 import bcrypt from 'bcryptjs';
 
 // Update user role (superuser only)
@@ -12,7 +12,12 @@ export async function PUT(request: NextRequest) {
   }
 
   const user = verifyToken(token);
-  if (!user || user.role !== 'superuser') {
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  // Check fresh role from DB to avoid stale token
+  const dbUser = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [user.id]);
+  if (!dbUser || dbUser.role !== 'superuser') {
     return NextResponse.json({ error: 'Forbidden - Superuser access required' }, { status: 403 });
   }
 
@@ -83,7 +88,11 @@ export async function DELETE(request: NextRequest) {
   }
 
   const user = verifyToken(token);
-  if (!user || user.role !== 'superuser') {
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const dbUser = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [user.id]);
+  if (!dbUser || dbUser.role !== 'superuser') {
     return NextResponse.json({ error: 'Forbidden - Superuser access required' }, { status: 403 });
   }
 

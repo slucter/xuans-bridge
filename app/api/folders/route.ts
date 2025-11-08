@@ -16,9 +16,11 @@ export async function GET(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  const dbUser = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [user.id]);
+  const effectiveRole = dbUser?.role || user.role || 'publisher';
 
   // Superuser can see all folders, publisher sees their own + shared folders
-  const allFolders = user.role === 'superuser'
+  const allFolders = effectiveRole === 'superuser'
     ? await queryAll<any>('SELECT * FROM folders ORDER BY created_at DESC')
     : await queryAll<any>(
         `SELECT DISTINCT f.*
@@ -30,7 +32,7 @@ export async function GET(request: NextRequest) {
       );
 
   // Check if there are videos in root folder (folder_id = null)
-  const rootVideosCount = user.role === 'superuser'
+  const rootVideosCount = effectiveRole === 'superuser'
     ? Number((await queryOne<{ count: string }>('SELECT COUNT(*) as count FROM videos WHERE folder_id IS NULL'))?.count || 0)
     : Number((await queryOne<{ count: string }>('SELECT COUNT(*) as count FROM videos WHERE folder_id IS NULL AND user_id = $1', [user.id]))?.count || 0);
 
@@ -102,6 +104,8 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  const dbUser2 = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [user.id]);
+  const effectiveRole2 = dbUser2?.role || user.role || 'publisher';
 
   try {
     const { name, parent_id } = await request.json();
@@ -119,7 +123,7 @@ export async function POST(request: NextRequest) {
     let parentLixstreamId: string | undefined;
     if (normalizedParentId) {
       // For superuser, don't filter by user_id
-      const parentFolder = user.role === 'superuser'
+      const parentFolder = effectiveRole2 === 'superuser'
         ? await queryOne<any>('SELECT lixstream_dir_id FROM folders WHERE id = $1', [normalizedParentId])
         : await queryOne<any>('SELECT lixstream_dir_id FROM folders WHERE id = $1 AND user_id = $2', [normalizedParentId, user.id]);
       
