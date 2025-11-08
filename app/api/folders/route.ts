@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import db from '@/lib/db';
+import { queryAll, queryOne, execute } from '@/lib/pgdb';
 import { createFolder as createLixstreamFolder } from '@/lib/lixstream';
+
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const token = request.cookies.get('auth_token')?.value;
@@ -17,21 +19,20 @@ export async function GET(request: NextRequest) {
 
   // Superuser can see all folders, publisher sees their own + shared folders
   const allFolders = user.role === 'superuser'
-    ? db.prepare('SELECT * FROM folders ORDER BY created_at DESC').all() as any[]
-    : db
-        .prepare(
-          `SELECT DISTINCT f.* 
-           FROM folders f 
-           LEFT JOIN folder_shares fs ON fs.folder_id = f.id AND fs.shared_to_user_id = ?
-           WHERE f.user_id = ? OR fs.shared_to_user_id = ?
-           ORDER BY f.created_at DESC`
-        )
-        .all(user.id, user.id, user.id) as any[];
+    ? await queryAll<any>('SELECT * FROM folders ORDER BY created_at DESC')
+    : await queryAll<any>(
+        `SELECT DISTINCT f.*
+         FROM folders f
+         LEFT JOIN folder_shares fs ON fs.folder_id = f.id AND fs.shared_to_user_id = $1
+         WHERE f.user_id = $2 OR fs.shared_to_user_id = $3
+         ORDER BY f.created_at DESC`,
+        [user.id, user.id, user.id]
+      );
 
   // Check if there are videos in root folder (folder_id = null)
   const rootVideosCount = user.role === 'superuser'
-    ? (db.prepare('SELECT COUNT(*) as count FROM videos WHERE folder_id IS NULL').get() as any).count
-    : (db.prepare('SELECT COUNT(*) as count FROM videos WHERE folder_id IS NULL AND user_id = ?').get(user.id) as any).count;
+    ? Number((await queryOne<{ count: string }>('SELECT COUNT(*) as count FROM videos WHERE folder_id IS NULL'))?.count || 0)
+    : Number((await queryOne<{ count: string }>('SELECT COUNT(*) as count FROM videos WHERE folder_id IS NULL AND user_id = $1', [user.id]))?.count || 0);
 
   // Build nested structure
   const folderMap = new Map<number, any>();
@@ -119,8 +120,8 @@ export async function POST(request: NextRequest) {
     if (normalizedParentId) {
       // For superuser, don't filter by user_id
       const parentFolder = user.role === 'superuser'
-        ? db.prepare('SELECT lixstream_dir_id FROM folders WHERE id = ?').get(normalizedParentId) as any
-        : db.prepare('SELECT lixstream_dir_id FROM folders WHERE id = ? AND user_id = ?').get(normalizedParentId, user.id) as any;
+        ? await queryOne<any>('SELECT lixstream_dir_id FROM folders WHERE id = $1', [normalizedParentId])
+        : await queryOne<any>('SELECT lixstream_dir_id FROM folders WHERE id = $1 AND user_id = $2', [normalizedParentId, user.id]);
       
       if (!parentFolder) {
         return NextResponse.json({ error: 'Parent folder not found' }, { status: 400 });
@@ -132,10 +133,11 @@ export async function POST(request: NextRequest) {
     const lixstreamResponse = await createLixstreamFolder(name.trim(), parentLixstreamId);
     const lixstreamDirId = lixstreamResponse.data.dir_id;
 
-    // Save to local database
-    const result = db
-      .prepare('INSERT INTO folders (user_id, name, parent_id, lixstream_dir_id) VALUES (?, ?, ?, ?)')
-      .run(user.id, name.trim(), normalizedParentId, lixstreamDirId);
+    // Save to Postgres database
+    const result = await execute(
+      'INSERT INTO folders (user_id, name, parent_id, lixstream_dir_id) VALUES ($1, $2, $3, $4)',
+      [user.id, name.trim(), normalizedParentId, lixstreamDirId]
+    );
 
     return NextResponse.json({
       success: true,

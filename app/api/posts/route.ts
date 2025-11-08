@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import db from '@/lib/db';
-import { getSetting } from '@/lib/settings';
+import { queryAll, queryOne, execute } from '@/lib/pgdb';
+import { getSettingAsync } from '@/lib/settings';
 
 export async function POST(request: NextRequest) {
   const token = request.cookies.get('auth_token')?.value;
@@ -41,40 +41,37 @@ export async function POST(request: NextRequest) {
       return numId;
     });
 
-    // Get video links
-    const placeholders = videoIdsNumbers.map(() => '?').join(',');
-    const videos = db
-      .prepare(
-        `SELECT id, name, file_share_link, file_embed_link 
-         FROM videos 
-         WHERE id IN (${placeholders}) AND user_id = ?`
-      )
-      .all(...videoIdsNumbers, user.id) as any[];
+    // Get video links from Postgres
+    const idPlaceholders = videoIdsNumbers.map((_, idx) => `$${idx + 1}`).join(',');
+    const queryParams = [...videoIdsNumbers, user.id];
+    const videos = await queryAll<any>(
+      `SELECT id, name, file_share_link, file_embed_link 
+       FROM videos 
+       WHERE id IN (${idPlaceholders}) AND user_id = $${videoIdsNumbers.length + 1}`,
+      queryParams
+    );
 
     if (videos.length === 0) {
       return NextResponse.json({ error: 'No valid videos found' }, { status: 400 });
     }
 
-    // Save post to database
-    // Convert boolean to integer (0 or 1) for SQLite
-    const postResult = db
-      .prepare(
-        `INSERT INTO posts (user_id, title, video_ids, telegram_posted, x_posted) 
-         VALUES (?, ?, ?, ?, ?)`
-      )
-      .run(
+    // Save post to Postgres
+    const postInsert = await execute(
+      `INSERT INTO posts (user_id, title, video_ids, telegram_posted, x_posted) 
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
         user.id,
         String(title),
         JSON.stringify(videoIdsNumbers),
-        0, // false = 0
-        0  // false = 0
-      );
-
-    const postId = postResult.lastInsertRowid;
+        false,
+        false,
+      ]
+    );
+    const postId = postInsert.lastInsertRowid;
 
     // Post to Telegram
-    // Use channel ID from settings or env variable
-    const TELEGRAM_CHANNEL_ID = getSetting('telegram_channel_id', 'TELEGRAM_CHANNEL_ID');
+    // Use channel ID from Postgres settings (fallback to env)
+    const TELEGRAM_CHANNEL_ID = await getSettingAsync('telegram_channel_id', 'TELEGRAM_CHANNEL_ID');
     const channelIdToUse = TELEGRAM_CHANNEL_ID ? TELEGRAM_CHANNEL_ID.trim() : null;
     
     let telegramMessageId: string | null = null;
@@ -88,9 +85,9 @@ export async function POST(request: NextRequest) {
         try {
           telegramMessageId = await postToTelegram(title, videos, channelIdToUse, image);
           if (telegramMessageId) {
-            db.prepare('UPDATE posts SET telegram_posted = 1, telegram_message_id = ? WHERE id = ?').run(
-              String(telegramMessageId),
-              postId
+            await execute(
+              'UPDATE posts SET telegram_posted = $1, telegram_message_id = $2 WHERE id = $3',
+              [true, String(telegramMessageId), postId]
             );
           }
         } catch (error: any) {
@@ -116,8 +113,8 @@ export async function POST(request: NextRequest) {
 }
 
 async function postToTelegram(title: string, videos: any[], channelId: string, image?: File | null): Promise<string> {
-  const TELEGRAM_BOT_TOKEN = getSetting('telegram_bot_token', 'TELEGRAM_BOT_TOKEN');
-  const TELEGRAM_CHANNEL_NAME = getSetting('telegram_channel_name', 'TELEGRAM_CHANNEL_NAME') || 'channel telegram';
+  const TELEGRAM_BOT_TOKEN = await getSettingAsync('telegram_bot_token', 'TELEGRAM_BOT_TOKEN');
+  const TELEGRAM_CHANNEL_NAME = (await getSettingAsync('telegram_channel_name', 'TELEGRAM_CHANNEL_NAME')) || 'channel telegram';
   
   if (!TELEGRAM_BOT_TOKEN) {
     throw new Error('Telegram bot token not configured. Please configure it in Settings.');

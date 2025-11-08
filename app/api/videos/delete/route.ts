@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import db from '@/lib/db';
+import { execute, queryOne } from '@/lib/pgdb';
+
+export const runtime = 'nodejs';
 
 // Delete single or multiple videos (only from local database, not from Lixstream)
 export async function DELETE(request: NextRequest) {
@@ -28,27 +30,41 @@ export async function DELETE(request: NextRequest) {
     let deletedCount = 0;
     const errors: string[] = [];
 
+    const isNumeric = (val: any) => {
+      if (typeof val === 'number') return Number.isFinite(val);
+      if (typeof val === 'string') return /^\d+$/.test(val);
+      return false;
+    };
+
     for (const videoId of video_ids) {
       try {
         // For superuser: delete from local database if exists, also delete shares
         if (user.role === 'superuser') {
-          // Check if video exists in local database (by local id)
-          const video = db.prepare('SELECT id, lixstream_file_id FROM videos WHERE id = ?').get(videoId) as any;
+          // If numeric, treat as local DB id; if not, treat as lixstream_file_id
+          let video: any = null;
+          if (isNumeric(videoId)) {
+            video = await queryOne<any>('SELECT id, lixstream_file_id FROM videos WHERE id = $1', [Number(videoId)]);
+          }
           
           if (video) {
             // Video exists in local database
             // Delete video shares first (by video_id and lixstream_file_id)
             if (video.id) {
-              db.prepare('DELETE FROM video_shares WHERE video_id = ?').run(video.id.toString());
+              await execute('DELETE FROM video_shares WHERE video_id = $1', [video.id]);
             }
             if (video.lixstream_file_id) {
-              db.prepare('DELETE FROM video_shares WHERE lixstream_file_id = ?').run(video.lixstream_file_id);
               // Mark as deleted in deleted_videos table
-              db.prepare('INSERT OR IGNORE INTO deleted_videos (lixstream_file_id, deleted_by_user_id) VALUES (?, ?)').run(video.lixstream_file_id, user.id);
+              await execute('DELETE FROM video_shares WHERE lixstream_file_id = $1', [video.lixstream_file_id]);
+              await execute(
+                `INSERT INTO deleted_videos (lixstream_file_id, deleted_by_user_id)
+                 VALUES ($1, $2)
+                 ON CONFLICT (lixstream_file_id) DO NOTHING`,
+                [video.lixstream_file_id, user.id]
+              );
             }
             
             // Delete from local database
-            db.prepare('DELETE FROM videos WHERE id = ?').run(videoId);
+            await execute('DELETE FROM videos WHERE id = $1', [Number(videoId)]);
             deletedCount++;
           } else {
             // Video only exists in Lixstream (not in local DB)
@@ -56,36 +72,40 @@ export async function DELETE(request: NextRequest) {
             const lixstreamFileId = videoId.toString();
             
             // Mark as deleted in deleted_videos table
-            db.prepare('INSERT OR IGNORE INTO deleted_videos (lixstream_file_id, deleted_by_user_id) VALUES (?, ?)').run(lixstreamFileId, user.id);
+            await execute(
+              `INSERT INTO deleted_videos (lixstream_file_id, deleted_by_user_id)
+               VALUES ($1, $2)
+               ON CONFLICT (lixstream_file_id) DO NOTHING`,
+              [lixstreamFileId, user.id]
+            );
             
             // Delete shares if any
-            db.prepare('DELETE FROM video_shares WHERE video_id = ? OR lixstream_file_id = ?').run(lixstreamFileId, lixstreamFileId);
+            await execute('DELETE FROM video_shares WHERE video_id = $1 OR lixstream_file_id = $1', [lixstreamFileId]);
             
             deletedCount++;
           }
         } else {
           // Publisher: can only delete their own videos from local database
-          const video = db
-            .prepare('SELECT id, lixstream_file_id FROM videos WHERE id = ? AND user_id = ?')
-            .get(videoId, user.id) as any;
+          let video: any = null;
+          if (isNumeric(videoId)) {
+            video = await queryOne<any>('SELECT id, lixstream_file_id FROM videos WHERE id = $1 AND user_id = $2', [Number(videoId), user.id]);
+          }
           
           if (video) {
             // Delete video shares first
             if (video.id) {
-              db.prepare('DELETE FROM video_shares WHERE video_id = ?').run(video.id.toString());
+              await execute('DELETE FROM video_shares WHERE video_id = $1', [video.id]);
             }
             if (video.lixstream_file_id) {
-              db.prepare('DELETE FROM video_shares WHERE lixstream_file_id = ?').run(video.lixstream_file_id);
+              await execute('DELETE FROM video_shares WHERE lixstream_file_id = $1', [video.lixstream_file_id]);
             }
             
             // Delete from local database
-            db.prepare('DELETE FROM videos WHERE id = ? AND user_id = ?').run(videoId, user.id);
+            await execute('DELETE FROM videos WHERE id = $1 AND user_id = $2', [Number(videoId), user.id]);
             deletedCount++;
           } else {
             // Check if it's a shared video (cannot delete shared videos - they're from Lixstream)
-            const sharedVideo = db
-              .prepare('SELECT * FROM video_shares WHERE lixstream_file_id = ? AND shared_to_user_id = ?')
-              .get(videoId.toString(), user.id) as any;
+            const sharedVideo = await queryOne<any>('SELECT 1 FROM video_shares WHERE lixstream_file_id = $1 AND shared_to_user_id = $2', [videoId.toString(), user.id]);
             
             if (sharedVideo) {
               errors.push(`Video ${videoId} cannot be deleted (shared video - contact superuser)`);

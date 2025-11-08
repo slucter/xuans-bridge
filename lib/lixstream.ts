@@ -1,12 +1,12 @@
 import axios from 'axios';
-import { getSetting } from './settings';
+import { getSettingAsync } from './settings';
 
-function getLixstreamApiUrl(): string {
-  return getSetting('lixstream_api_url', 'LIXSTREAM_API_URL') || 'https://api.luxsioab.com/pub/api';
+async function getLixstreamApiUrl(): Promise<string> {
+  return (await getSettingAsync('lixstream_api_url', 'LIXSTREAM_API_URL')) || 'https://api.luxsioab.com/pub/api';
 }
 
-function getLixstreamApiKey(): string {
-  return getSetting('lixstream_api_key', 'LIXSTREAM_API_KEY') || '';
+async function getLixstreamApiKey(): Promise<string> {
+  return (await getSettingAsync('lixstream_api_key', 'LIXSTREAM_API_KEY')) || '';
 }
 
 export interface CreateUploadTaskResponse {
@@ -102,8 +102,8 @@ export async function createUploadTask(
   fileName: string,
   dirId?: string
 ): Promise<CreateUploadTaskResponse> {
-  const LIXSTREAM_API_URL = getLixstreamApiUrl();
-  const LIXSTREAM_API_KEY = getLixstreamApiKey();
+  const LIXSTREAM_API_URL = await getLixstreamApiUrl();
+  const LIXSTREAM_API_KEY = await getLixstreamApiKey();
   
   const response = await axios.post(
     `${LIXSTREAM_API_URL}/local/upload`,
@@ -127,8 +127,8 @@ export async function confirmUpload(
   uploadId: string,
   result: boolean
 ): Promise<UploadCallbackResponse> {
-  const LIXSTREAM_API_URL = getLixstreamApiUrl();
-  const LIXSTREAM_API_KEY = getLixstreamApiKey();
+  const LIXSTREAM_API_URL = await getLixstreamApiUrl();
+  const LIXSTREAM_API_KEY = await getLixstreamApiKey();
   
   const response = await axios.post(
     `${LIXSTREAM_API_URL}/local/upload/callback`,
@@ -148,8 +148,8 @@ export async function confirmUpload(
 
 // Create folder
 export async function createFolder(name: string, parentId?: string): Promise<CreateFolderResponse> {
-  const LIXSTREAM_API_URL = getLixstreamApiUrl();
-  const LIXSTREAM_API_KEY = getLixstreamApiKey();
+  const LIXSTREAM_API_URL = await getLixstreamApiUrl();
+  const LIXSTREAM_API_KEY = await getLixstreamApiKey();
   
   try {
     const response = await axios.post(
@@ -185,8 +185,8 @@ export async function remoteUpload(
   name: string,
   dirId?: string
 ): Promise<RemoteUploadResponse> {
-  const LIXSTREAM_API_URL = getLixstreamApiUrl();
-  const LIXSTREAM_API_KEY = getLixstreamApiKey();
+  const LIXSTREAM_API_URL = await getLixstreamApiUrl();
+  const LIXSTREAM_API_KEY = await getLixstreamApiKey();
   
   try {
     // Build request body - only include dir_id if it's provided and not null
@@ -240,8 +240,8 @@ export async function remoteUpload(
 
 // Get all files from Lixstream (paginated)
 export async function getAllFilesFromLixstream(): Promise<LixstreamFile[]> {
-  const LIXSTREAM_API_URL = getLixstreamApiUrl();
-  const LIXSTREAM_API_KEY = getLixstreamApiKey();
+  const LIXSTREAM_API_URL = await getLixstreamApiUrl();
+  const LIXSTREAM_API_KEY = await getLixstreamApiKey();
   
   const allFiles: LixstreamFile[] = [];
   let pageNum = 1;
@@ -283,7 +283,42 @@ export async function getAllFilesFromLixstream(): Promise<LixstreamFile[]> {
         console.log('=== END RAW RESPONSE ===\n');
       }
       
-      allFiles.push(...files);
+      // Normalize file shape to ensure dir_id and code are consistently available
+      const normalized = files.map((raw: any) => {
+        // Extract/normalize dir_id from possible variant keys
+        const rawDirId =
+          raw?.dir_id ??
+          raw?.dirId ??
+          raw?.dirID ??
+          raw?.directory_id ??
+          raw?.dir_code ??
+          raw?.dirCode ??
+          raw?.dir_id_str ??
+          raw?.dirIdStr ??
+          raw?.parent_dir_id ??
+          raw?.parentId;
+
+        const dir_id = rawDirId != null && rawDirId !== '' ? String(rawDirId) : undefined;
+
+        // Extract code from share/embed links if not present
+        let code: string | undefined = raw?.code;
+        if (!code && typeof raw?.share_link === 'string') {
+          const m = raw.share_link.match(/\/s\/([^\/\?]+)/);
+          if (m) code = m[1];
+        }
+        if (!code && typeof raw?.embed_link === 'string') {
+          const m = raw.embed_link.match(/\/e\/([^\/\?]+)/);
+          if (m) code = m[1];
+        }
+
+        return {
+          ...raw,
+          code,
+          dir_id,
+        } as LixstreamFile;
+      });
+
+      allFiles.push(...normalized);
       
       // Check if there are more pages
       const totalElements = response.data.data?.total_elements || response.data.data?.total || 0;

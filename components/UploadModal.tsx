@@ -114,19 +114,19 @@ export default function UploadModal({
         return updated;
       });
 
-      // Step 1: Create upload task
-      const formData = new FormData();
-      formData.append('file', uploadFile.file);
-      // Only append folder_id if it's not null (root folder)
-      if (uploadFolderId !== null && uploadFolderId !== undefined) {
-        formData.append('folder_id', uploadFolderId.toString());
-      }
-
-      const createResponse = await axios.post('/api/videos', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
+      // Step 1: Create upload task (send only metadata, not file)
+      const createResponse = await axios.post(
+        '/api/videos',
+        {
+          name: uploadFile.file.name,
+          folder_id: uploadFolderId ?? null,
         },
-      });
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
 
       const { uploadTask, videoId } = createResponse.data;
 

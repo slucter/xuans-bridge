@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import db from '@/lib/db';
+import { queryAll, queryOne, execute } from '@/lib/pgdb';
 import bcrypt from 'bcryptjs';
 
 // Get all users (superuser only)
@@ -16,9 +16,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Forbidden - Superuser access required' }, { status: 403 });
   }
 
-  const users = db
-    .prepare('SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC')
-    .all() as any[];
+  const users = await queryAll<any>(
+    'SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC'
+  );
 
   return NextResponse.json({ users });
 }
@@ -53,8 +53,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if username already exists
-    const existingUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    // Check if username already exists (Postgres)
+    const existingUser = await queryOne<any>('SELECT id FROM users WHERE username = $1', [username]);
     if (existingUser) {
       return NextResponse.json(
         { error: 'Username already exists' },
@@ -65,9 +65,10 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(password, 10);
     const userRole = role || 'publisher';
 
-    const result = db
-      .prepare('INSERT INTO users (username, password, email, role) VALUES (?, ?, ?, ?)')
-      .run(username, hashedPassword, email || null, userRole);
+    const result = await execute(
+      'INSERT INTO users (username, password, email, role) VALUES ($1, $2, $3, $4)',
+      [username, hashedPassword, email || null, userRole]
+    );
 
     return NextResponse.json({
       success: true,

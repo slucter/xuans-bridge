@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import db from '@/lib/db';
+import { queryOne, execute } from '@/lib/pgdb';
 import { remoteUpload } from '@/lib/lixstream';
+
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   const token = request.cookies.get('auth_token')?.value;
@@ -52,9 +54,9 @@ export async function POST(request: NextRequest) {
       // Get folder's lixstream_dir_id
       // For superuser, don't filter by user_id since they can see all folders
       const folder = user.role === 'superuser'
-        ? db.prepare('SELECT id, lixstream_dir_id, name FROM folders WHERE id = ?').get(localFolderId) as any
-        : db.prepare('SELECT id, lixstream_dir_id, name FROM folders WHERE id = ? AND user_id = ?').get(localFolderId, user.id) as any;
-      
+        ? await queryOne<any>('SELECT id, lixstream_dir_id, name FROM folders WHERE id = $1', [localFolderId])
+        : await queryOne<any>('SELECT id, lixstream_dir_id, name FROM folders WHERE id = $1 AND user_id = $2', [localFolderId, user.id]);
+
       if (folder) {
         if (folder.lixstream_dir_id) {
           lixstreamDirId = folder.lixstream_dir_id;
@@ -101,10 +103,10 @@ export async function POST(request: NextRequest) {
 
     // Update folder share link if dir_share_link is available and folder_id is provided
     if (remoteUploadResponse.data.dir_share_link && localFolderId) {
-      db.prepare('UPDATE folders SET folder_share_link = ? WHERE id = ?').run(
+      await execute('UPDATE folders SET folder_share_link = $1 WHERE id = $2', [
         remoteUploadResponse.data.dir_share_link,
-        localFolderId
-      );
+        localFolderId,
+      ]);
     }
 
     // Remote upload does not save to database

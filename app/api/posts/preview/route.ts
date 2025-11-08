@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { getSetting } from '@/lib/settings';
+import { getSettingAsync } from '@/lib/settings';
 
 export async function GET(request: NextRequest) {
   const token = request.cookies.get('auth_token')?.value;
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const TELEGRAM_CHANNEL_NAME = getSetting('telegram_channel_name', 'TELEGRAM_CHANNEL_NAME') || 'channel telegram';
+  const TELEGRAM_CHANNEL_NAME = (await getSettingAsync('telegram_channel_name', 'TELEGRAM_CHANNEL_NAME')) || 'channel telegram';
   
   return NextResponse.json({ channelName: TELEGRAM_CHANNEL_NAME });
 }

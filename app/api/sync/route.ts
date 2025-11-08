@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import db from '@/lib/db';
 import { getAllFilesFromLixstream } from '@/lib/lixstream';
+import { execute } from '@/lib/pgdb';
+
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   const token = request.cookies.get('auth_token')?.value;
@@ -250,12 +253,12 @@ export async function POST(request: NextRequest) {
 
     // Delete folders
     let deletedFoldersCount = 0;
-    foldersToDelete.forEach((folderId) => {
+    foldersToDelete.forEach(async (folderId) => {
       try {
         if (user.role === 'superuser') {
-          db.prepare('DELETE FROM folders WHERE id = ?').run(folderId);
+          await execute('DELETE FROM folders WHERE id = $1', [folderId]);
         } else {
-          db.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').run(folderId, user.id);
+          await execute('DELETE FROM folders WHERE id = $1 AND user_id = $2', [folderId, user.id]);
         }
         deletedFoldersCount++;
       } catch (error) {
@@ -265,12 +268,12 @@ export async function POST(request: NextRequest) {
 
     // Delete videos
     let deletedVideosCount = 0;
-    videosToDelete.forEach((videoId) => {
+    videosToDelete.forEach(async (videoId) => {
       try {
         if (user.role === 'superuser') {
-          db.prepare('DELETE FROM videos WHERE id = ?').run(videoId);
+          await execute('DELETE FROM videos WHERE id = $1', [videoId]);
         } else {
-          db.prepare('DELETE FROM videos WHERE id = ? AND user_id = ?').run(videoId, user.id);
+          await execute('DELETE FROM videos WHERE id = $1 AND user_id = $2', [videoId, user.id]);
         }
         deletedVideosCount++;
       } catch (error) {
@@ -280,7 +283,7 @@ export async function POST(request: NextRequest) {
 
     // Update videos from uploading to completed
     let updatedVideosCount = 0;
-    videosToUpdate.forEach(({ videoId, file }) => {
+    videosToUpdate.forEach(async ({ videoId, file }) => {
       try {
         // Extract file code from file
         const fileCode = file.code || 
@@ -293,25 +296,27 @@ export async function POST(request: NextRequest) {
         const thumbnailUrl = file.thumbnail || null;
 
         if (user.role === 'superuser') {
-          db.prepare(
+          await execute(
             `UPDATE videos 
              SET upload_status = 'completed',
-                 lixstream_file_id = ?,
-                 file_share_link = ?,
-                 file_embed_link = ?,
-                 thumbnail_url = ?
-             WHERE id = ?`
-          ).run(fileCode, shareLink, embedLink, thumbnailUrl, videoId);
+                 lixstream_file_id = $1,
+                 file_share_link = $2,
+                 file_embed_link = $3,
+                 thumbnail_url = $4
+             WHERE id = $5`,
+            [fileCode, shareLink, embedLink, thumbnailUrl, videoId]
+          );
         } else {
-          db.prepare(
+          await execute(
             `UPDATE videos 
              SET upload_status = 'completed',
-                 lixstream_file_id = ?,
-                 file_share_link = ?,
-                 file_embed_link = ?,
-                 thumbnail_url = ?
-             WHERE id = ? AND user_id = ?`
-          ).run(fileCode, shareLink, embedLink, thumbnailUrl, videoId, user.id);
+                 lixstream_file_id = $1,
+                 file_share_link = $2,
+                 file_embed_link = $3,
+                 thumbnail_url = $4
+             WHERE id = $5 AND user_id = $6`,
+            [fileCode, shareLink, embedLink, thumbnailUrl, videoId, user.id]
+          );
         }
         updatedVideosCount++;
       } catch (error) {

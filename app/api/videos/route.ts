@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import db from '@/lib/db';
+import { queryAll, queryOne, execute } from '@/lib/pgdb';
 import { createUploadTask, confirmUpload, getAllFilesFromLixstream } from '@/lib/lixstream';
+
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const token = request.cookies.get('auth_token')?.value;
@@ -36,7 +38,7 @@ export async function GET(request: NextRequest) {
     const lixstreamFiles = await getAllFilesFromLixstream();
     
     // Get all folders to map dir_id to folder name and local folder_id
-    const allFolders = db.prepare('SELECT * FROM folders').all() as any[];
+    const allFolders = await queryAll<any>('SELECT * FROM folders');
     const folderMapByName = new Map<string, string>(); // Map dir_id (normalized) -> folder name
     const folderMapById = new Map<string, number>(); // Map dir_id (normalized) -> local folder_id
     
@@ -76,11 +78,33 @@ export async function GET(request: NextRequest) {
     console.log('=== END LIXSTREAM API RESPONSE ===\n');
 
     // Get list of deleted video IDs (lixstream_file_id) to filter out
+    const deletedRows = await queryAll<any>('SELECT lixstream_file_id FROM deleted_videos');
     const deletedVideoIds = new Set(
-      (db.prepare('SELECT lixstream_file_id FROM deleted_videos').all() as any[])
+      deletedRows
         .map((d) => d.lixstream_file_id)
         .filter((id): id is string => id !== null && id !== undefined)
     );
+
+    // Build map from local videos by lixstream_file_id -> local folder info
+    const localFolderByFileId = new Map<string, { folder_id: number | null; folder_name: string | null; local_id?: number }>();
+    {
+      const rows = await queryAll<any>(
+        `SELECT v.id as local_id, v.lixstream_file_id, v.folder_id,
+                COALESCE(f.name, CASE WHEN v.folder_id IS NULL THEN 'Root' ELSE NULL END) AS folder_name
+         FROM videos v
+         LEFT JOIN folders f ON v.folder_id = f.id
+         WHERE v.lixstream_file_id IS NOT NULL`
+      );
+      for (const r of rows) {
+        if (r.lixstream_file_id) {
+          localFolderByFileId.set(r.lixstream_file_id, {
+            folder_id: r.folder_id ?? null,
+            folder_name: r.folder_name ?? null,
+            local_id: r.local_id,
+          });
+        }
+      }
+    }
 
     // Convert Lixstream files to Video format, excluding deleted videos
     const videosFromLixstream = lixstreamFiles
@@ -127,8 +151,21 @@ export async function GET(request: NextRequest) {
         folderName = 'Root';
       }
 
+      // Fallback to local DB mapping when dir_id is missing or unmapped
+      if ((!localFolderId || !folderName) && fileCode) {
+        const local = localFolderByFileId.get(fileCode);
+        if (local) {
+          localFolderId = local.folder_id;
+          folderName = local.folder_name;
+        }
+      }
+
+      // Prefer local numeric id if exists
+      const localMap = fileCode ? localFolderByFileId.get(fileCode) : undefined;
+      const idVal = (localMap?.local_id ?? null) ?? (fileCode || `lixstream-${Date.now()}-${Math.random()}`);
+
       return {
-        id: fileCode || `lixstream-${Date.now()}-${Math.random()}`, // Use file code as ID
+        id: idVal as any,
         name: file.name || file.title || 'Unknown',
         folder_id: localFolderId,
         folder_name: folderName,
@@ -145,33 +182,28 @@ export async function GET(request: NextRequest) {
     // Also get videos from local database (for recently uploaded videos that may not appear in Lixstream API yet)
     let localVideos: any[] = [];
     if (folderId === null) {
-      localVideos = db
-        .prepare(
-          `SELECT v.*, 'Root' as folder_name 
-           FROM videos v 
-           WHERE v.folder_id IS NULL
-           ORDER BY v.created_at DESC`
-        )
-        .all() as any[];
+      localVideos = await queryAll<any>(
+        `SELECT v.*, 'Root' as folder_name 
+         FROM videos v 
+         WHERE v.folder_id IS NULL
+         ORDER BY v.created_at DESC`
+      );
     } else if (folderId !== undefined) {
-      localVideos = db
-        .prepare(
-          `SELECT v.*, f.name as folder_name 
-           FROM videos v 
-           LEFT JOIN folders f ON v.folder_id = f.id 
-           WHERE v.folder_id = ?
-           ORDER BY v.created_at DESC`
-        )
-        .all(folderId) as any[];
+      localVideos = await queryAll<any>(
+        `SELECT v.*, f.name as folder_name 
+         FROM videos v 
+         LEFT JOIN folders f ON v.folder_id = f.id 
+         WHERE v.folder_id = $1
+         ORDER BY v.created_at DESC`,
+        [folderId]
+      );
     } else {
-      localVideos = db
-        .prepare(
-          `SELECT v.*, f.name as folder_name 
-           FROM videos v 
-           LEFT JOIN folders f ON v.folder_id = f.id 
-           ORDER BY v.created_at DESC`
-        )
-        .all() as any[];
+      localVideos = await queryAll<any>(
+        `SELECT v.*, f.name as folder_name 
+         FROM videos v 
+         LEFT JOIN folders f ON v.folder_id = f.id 
+         ORDER BY v.created_at DESC`
+      );
     }
 
     // Create a Set of lixstream_file_id from Lixstream API to avoid duplicates
@@ -199,7 +231,7 @@ export async function GET(request: NextRequest) {
 
     // Convert local videos to Video format
     const localVideosFormatted = localVideosFiltered.map((v) => ({
-      id: v.id.toString(),
+      id: v.id,
       name: v.name,
       folder_id: v.folder_id,
       folder_name: v.folder_name || (v.folder_id === null ? 'Root' : null),
@@ -245,40 +277,38 @@ export async function GET(request: NextRequest) {
     // First, get their own videos from database
     let ownVideos: any[] = [];
     if (folderId === null) {
-      ownVideos = db
-        .prepare(
-          `SELECT v.*, 'Root' as folder_name 
-           FROM videos v 
-           WHERE v.user_id = ? AND v.folder_id IS NULL
-           ORDER BY v.created_at DESC`
-        )
-        .all(user.id) as any[];
+      ownVideos = await queryAll<any>(
+        `SELECT v.*, 'Root' as folder_name 
+         FROM videos v 
+         WHERE v.user_id = $1 AND v.folder_id IS NULL
+         ORDER BY v.created_at DESC`,
+        [user.id]
+      );
     } else if (folderId !== undefined) {
-      ownVideos = db
-        .prepare(
-          `SELECT v.*, f.name as folder_name 
-           FROM videos v 
-           LEFT JOIN folders f ON v.folder_id = f.id 
-           WHERE v.user_id = ? AND v.folder_id = ?
-           ORDER BY v.created_at DESC`
-        )
-        .all(user.id, folderId) as any[];
+      ownVideos = await queryAll<any>(
+        `SELECT v.*, f.name as folder_name 
+         FROM videos v 
+         LEFT JOIN folders f ON v.folder_id = f.id 
+         WHERE v.user_id = $1 AND v.folder_id = $2
+         ORDER BY v.created_at DESC`,
+        [user.id, folderId]
+      );
     } else {
-      ownVideos = db
-        .prepare(
-          `SELECT v.*, f.name as folder_name 
-           FROM videos v 
-           LEFT JOIN folders f ON v.folder_id = f.id 
-           WHERE v.user_id = ?
-           ORDER BY v.created_at DESC`
-        )
-        .all(user.id) as any[];
+      ownVideos = await queryAll<any>(
+        `SELECT v.*, f.name as folder_name 
+         FROM videos v 
+         LEFT JOIN folders f ON v.folder_id = f.id 
+         WHERE v.user_id = $1
+         ORDER BY v.created_at DESC`,
+        [user.id]
+      );
     }
 
     // Get shared video IDs
-    const sharedVideoIds = db
-      .prepare('SELECT DISTINCT lixstream_file_id FROM video_shares WHERE shared_to_user_id = ?')
-      .all(user.id) as any[];
+    const sharedVideoIds = await queryAll<any>(
+      'SELECT DISTINCT lixstream_file_id FROM video_shares WHERE shared_to_user_id = $1',
+      [user.id]
+    );
 
     if (sharedVideoIds.length > 0) {
       // Fetch shared videos from Lixstream
@@ -286,14 +316,13 @@ export async function GET(request: NextRequest) {
       const sharedFileIds = new Set(sharedVideoIds.map((s) => s.lixstream_file_id));
       
       // Get all folders to map dir_id to folder name
-      const allFolders = db
-        .prepare(
-          `SELECT DISTINCT f.* 
-           FROM folders f 
-           LEFT JOIN folder_shares fs ON fs.folder_id = f.id AND fs.shared_to_user_id = ?
-           WHERE f.user_id = ? OR fs.shared_to_user_id = ?`
-        )
-        .all(user.id, user.id, user.id) as any[];
+      const allFolders = await queryAll<any>(
+        `SELECT DISTINCT f.* 
+         FROM folders f 
+         LEFT JOIN folder_shares fs ON fs.folder_id = f.id AND fs.shared_to_user_id = $1
+         WHERE f.user_id = $2 OR fs.shared_to_user_id = $3`,
+        [user.id, user.id, user.id]
+      );
       
       const folderMap = new Map<string, string>();
       allFolders.forEach((f) => {
@@ -368,15 +397,28 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const folderIdStr = formData.get('folder_id') as string | null;
+    const contentType = request.headers.get('content-type') || '';
+    let fileName: string | undefined;
+    let folderIdStr: string | null = null;
 
-    if (!file) {
-      return NextResponse.json({ error: 'File is required' }, { status: 400 });
+    if (contentType.includes('application/json')) {
+      const { name, folder_id } = await request.json();
+      if (!name || typeof name !== 'string') {
+        return NextResponse.json({ error: 'File name is required' }, { status: 400 });
+      }
+      fileName = name;
+      folderIdStr = folder_id !== undefined && folder_id !== null ? String(folder_id) : null;
+    } else {
+      // Fallback: support multipart/form-data for backward compatibility
+      const formData = await request.formData();
+      const file = formData.get('file') as File | null;
+      const nameFromForm = (formData.get('name') as string) || file?.name;
+      folderIdStr = formData.get('folder_id') as string | null;
+      if (!nameFromForm) {
+        return NextResponse.json({ error: 'File name is required' }, { status: 400 });
+      }
+      fileName = nameFromForm;
     }
-
-    const fileName = file.name;
 
     // Get lixstream_dir_id if folder is selected
     let lixstreamDirId: string | undefined;
@@ -387,8 +429,8 @@ export async function POST(request: NextRequest) {
       // Get folder's lixstream_dir_id
       // For superuser, don't filter by user_id since they can see all folders
       const folder = user.role === 'superuser'
-        ? db.prepare('SELECT lixstream_dir_id FROM folders WHERE id = ?').get(localFolderId) as any
-        : db.prepare('SELECT lixstream_dir_id FROM folders WHERE id = ? AND user_id = ?').get(localFolderId, user.id) as any;
+        ? await queryOne<any>('SELECT lixstream_dir_id FROM folders WHERE id = $1', [localFolderId])
+        : await queryOne<any>('SELECT lixstream_dir_id FROM folders WHERE id = $1 AND user_id = $2', [localFolderId, user.id]);
       
       if (folder) {
         lixstreamDirId = folder.lixstream_dir_id;
@@ -396,21 +438,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 1: Create upload task
-    const uploadTask = await createUploadTask(fileName, lixstreamDirId);
+    const uploadTask = await createUploadTask(String(fileName), lixstreamDirId);
 
     // Save video record to database
-    const videoResult = db
-      .prepare(
-        `INSERT INTO videos (user_id, folder_id, name, lixstream_upload_id, upload_status) 
-         VALUES (?, ?, ?, ?, ?)`
-      )
-      .run(
+    const videoResult = await execute(
+      `INSERT INTO videos (user_id, folder_id, name, lixstream_upload_id, upload_status) 
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
         user.id,
         localFolderId,
-        fileName,
+        String(fileName),
         uploadTask.data.id,
-        'uploading'
-      );
+        'uploading',
+      ]
+    );
 
     const videoId = videoResult.lastInsertRowid;
 
@@ -471,32 +512,33 @@ export async function PUT(request: NextRequest) {
     }
 
     // Update video record
-    const video = db.prepare('SELECT folder_id FROM videos WHERE id = ?').get(videoId) as any;
+    const video = await queryOne<any>('SELECT folder_id FROM videos WHERE id = $1', [videoId]);
     
     // Update folder share link if dir_share_link is available
     if (callbackResponse.data.dir_share_link && video?.folder_id) {
-      db.prepare('UPDATE folders SET folder_share_link = ? WHERE id = ?').run(
+      await execute('UPDATE folders SET folder_share_link = $1 WHERE id = $2', [
         callbackResponse.data.dir_share_link,
-        video.folder_id
-      );
+        video.folder_id,
+      ]);
     }
 
-    db.prepare(
+    await execute(
       `UPDATE videos 
-       SET upload_status = ?, 
-           lixstream_file_id = ?,
-           file_share_link = ?, 
-           file_embed_link = ?,
-           thumbnail_url = ?
-       WHERE id = ? AND user_id = ?`
-    ).run(
-      result ? 'completed' : 'failed',
-      lixstreamFileId,
-      callbackResponse.data.file_share_link || null,
-      callbackResponse.data.file_embed_link || null,
-      callbackResponse.data.thumbnail_url || null,
-      videoId,
-      user.id
+       SET upload_status = $1, 
+           lixstream_file_id = $2,
+           file_share_link = $3, 
+           file_embed_link = $4,
+           thumbnail_url = $5
+       WHERE id = $6 AND user_id = $7`,
+      [
+        result ? 'completed' : 'failed',
+        lixstreamFileId,
+        callbackResponse.data.file_share_link || null,
+        callbackResponse.data.file_embed_link || null,
+        callbackResponse.data.thumbnail_url || null,
+        videoId,
+        user.id,
+      ]
     );
 
     return NextResponse.json({

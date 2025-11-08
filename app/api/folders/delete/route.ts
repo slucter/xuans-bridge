@@ -1,24 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import db from '@/lib/db';
+import { queryAll, queryOne, execute } from '@/lib/pgdb';
+
+export const runtime = 'nodejs';
 
 /**
  * Recursively delete a folder and all its contents (subfolders and videos)
  */
-function deleteFolderRecursive(folderId: number, userId: number, userRole: string): { deletedFolders: number; deletedVideos: number; errors: string[] } {
+async function deleteFolderRecursive(
+  folderId: number,
+  userId: number,
+  userRole: string
+): Promise<{ deletedFolders: number; deletedVideos: number; errors: string[] }> {
   let deletedFoldersCount = 0;
   let deletedVideosCount = 0;
   const errors: string[] = [];
 
   // Get all subfolders
   const subfolders = userRole === 'superuser'
-    ? db.prepare('SELECT id FROM folders WHERE parent_id = ?').all(folderId) as any[]
-    : db.prepare('SELECT id FROM folders WHERE parent_id = ? AND user_id = ?').all(folderId, userId) as any[];
+    ? await queryAll<any>('SELECT id FROM folders WHERE parent_id = $1', [folderId])
+    : await queryAll<any>('SELECT id FROM folders WHERE parent_id = $1 AND user_id = $2', [folderId, userId]);
 
   // Recursively delete all subfolders first
   for (const subfolder of subfolders) {
     try {
-      const result = deleteFolderRecursive(subfolder.id, userId, userRole);
+      const result = await deleteFolderRecursive(subfolder.id, userId, userRole);
       deletedFoldersCount += result.deletedFolders;
       deletedVideosCount += result.deletedVideos;
       errors.push(...result.errors);
@@ -29,27 +35,30 @@ function deleteFolderRecursive(folderId: number, userId: number, userRole: strin
 
   // Get all videos in this folder
   const videos = userRole === 'superuser'
-    ? db.prepare('SELECT id, lixstream_file_id FROM videos WHERE folder_id = ?').all(folderId) as any[]
-    : db.prepare('SELECT id, lixstream_file_id FROM videos WHERE folder_id = ? AND user_id = ?').all(folderId, userId) as any[];
+    ? await queryAll<any>('SELECT id, lixstream_file_id FROM videos WHERE folder_id = $1', [folderId])
+    : await queryAll<any>('SELECT id, lixstream_file_id FROM videos WHERE folder_id = $1 AND user_id = $2', [folderId, userId]);
 
-  // Delete all videos in this folder
+  // Delete all videos in this folder (DB-only)
   for (const video of videos) {
     try {
       // Delete video shares first (by video_id and lixstream_file_id)
       if (video.id) {
-        db.prepare('DELETE FROM video_shares WHERE video_id = ?').run(video.id.toString());
+        await execute('DELETE FROM video_shares WHERE video_id = $1', [video.id.toString()]);
       }
       if (video.lixstream_file_id) {
-        db.prepare('DELETE FROM video_shares WHERE lixstream_file_id = ?').run(video.lixstream_file_id);
-        // Mark as deleted in deleted_videos table (for superuser to hide from Lixstream API)
-        db.prepare('INSERT OR IGNORE INTO deleted_videos (lixstream_file_id, deleted_by_user_id) VALUES (?, ?)').run(video.lixstream_file_id, userId);
+        await execute('DELETE FROM video_shares WHERE lixstream_file_id = $1', [video.lixstream_file_id]);
+        // Optional: mark as deleted in deleted_videos table (still DB-only)
+        await execute(
+          'INSERT INTO deleted_videos (lixstream_file_id, deleted_by_user_id) VALUES ($1, $2) ON CONFLICT (lixstream_file_id) DO NOTHING',
+          [video.lixstream_file_id, userId]
+        );
       }
-      
+
       // Delete the video
       if (userRole === 'superuser') {
-        db.prepare('DELETE FROM videos WHERE id = ?').run(video.id);
+        await execute('DELETE FROM videos WHERE id = $1', [video.id]);
       } else {
-        db.prepare('DELETE FROM videos WHERE id = ? AND user_id = ?').run(video.id, userId);
+        await execute('DELETE FROM videos WHERE id = $1 AND user_id = $2', [video.id, userId]);
       }
       deletedVideosCount++;
     } catch (error: any) {
@@ -59,7 +68,7 @@ function deleteFolderRecursive(folderId: number, userId: number, userRole: strin
 
   // Delete folder shares
   try {
-    db.prepare('DELETE FROM folder_shares WHERE folder_id = ?').run(folderId);
+    await execute('DELETE FROM folder_shares WHERE folder_id = $1', [folderId]);
   } catch (error: any) {
     errors.push(`Failed to delete folder shares for folder ${folderId}: ${error.message}`);
   }
@@ -67,9 +76,9 @@ function deleteFolderRecursive(folderId: number, userId: number, userRole: strin
   // Delete the folder itself
   try {
     if (userRole === 'superuser') {
-      db.prepare('DELETE FROM folders WHERE id = ?').run(folderId);
+      await execute('DELETE FROM folders WHERE id = $1', [folderId]);
     } else {
-      db.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').run(folderId, userId);
+      await execute('DELETE FROM folders WHERE id = $1 AND user_id = $2', [folderId, userId]);
     }
     deletedFoldersCount++;
   } catch (error: any) {
@@ -77,11 +86,7 @@ function deleteFolderRecursive(folderId: number, userId: number, userRole: strin
     throw error; // Re-throw to stop the process if folder deletion fails
   }
 
-  return {
-    deletedFolders: deletedFoldersCount,
-    deletedVideos: deletedVideosCount,
-    errors,
-  };
+  return { deletedFolders: deletedFoldersCount, deletedVideos: deletedVideosCount, errors };
 }
 
 export async function DELETE(request: NextRequest) {
@@ -109,8 +114,8 @@ export async function DELETE(request: NextRequest) {
     // Check if folder exists
     // Superuser can delete any folder, publisher only their own
     const folder = user.role === 'superuser'
-      ? db.prepare('SELECT * FROM folders WHERE id = ?').get(folderIdNum) as any
-      : db.prepare('SELECT * FROM folders WHERE id = ? AND user_id = ?').get(folderIdNum, user.id) as any;
+      ? await queryOne<any>('SELECT * FROM folders WHERE id = $1', [folderIdNum])
+      : await queryOne<any>('SELECT * FROM folders WHERE id = $1 AND user_id = $2', [folderIdNum, user.id]);
 
     if (!folder) {
       return NextResponse.json({ error: 'Folder not found or unauthorized' }, { status: 404 });
@@ -118,7 +123,7 @@ export async function DELETE(request: NextRequest) {
 
     // Recursively delete folder and all its contents
     const role = user.role || 'publisher';
-    const result = deleteFolderRecursive(folderIdNum, user.id, role);
+    const result = await deleteFolderRecursive(folderIdNum, user.id, role);
 
     // If there were errors but some items were deleted, return partial success
     if (result.errors.length > 0 && (result.deletedFolders > 0 || result.deletedVideos > 0)) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import db from '@/lib/db';
+import { execute } from '@/lib/pgdb';
 import bcrypt from 'bcryptjs';
 
 // Update user role (superuser only)
@@ -55,7 +55,7 @@ export async function PUT(request: NextRequest) {
 
     values.push(id);
 
-    db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    await execute(`UPDATE users SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
@@ -98,7 +98,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 });
     }
 
-    db.prepare('DELETE FROM users WHERE id = ?').run(userIdNum);
+    await execute('DELETE FROM users WHERE id = $1', [userIdNum]);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

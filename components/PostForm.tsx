@@ -28,7 +28,8 @@ export default function PostForm({ videos }: PostFormProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  const completedVideos = videos.filter((v) => v.upload_status === 'completed');
+  // Only allow videos that exist in local database (numeric id)
+  const completedVideos = videos.filter((v) => v.upload_status === 'completed' && typeof (v as any).id === 'number');
 
   useEffect(() => {
     // Fetch channel name from API
@@ -537,7 +538,8 @@ function FolderTreeItem({
   onToggleVideo,
   searchQuery = '',
 }: FolderTreeItemProps) {
-  const isExpanded = folder.id !== null ? expandedFolders.has(folder.id) : false;
+  // Always expand Root (id === null) so its children are visible
+  const isExpanded = folder.id === null ? true : expandedFolders.has(folder.id);
   const hasChildren = folder.children && folder.children.length > 0;
   const hasVideos = folder.videos && folder.videos.length > 0;
 

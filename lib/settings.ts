@@ -1,4 +1,5 @@
 import db from './db';
+import { queryOne, queryAll, execute } from './pgdb';
 
 /**
  * Get setting value from database, fallback to environment variable
@@ -15,6 +16,24 @@ export function getSetting(key: string, envKey?: string): string | null {
     return process.env[envKey] || null;
   }
   
+  return null;
+}
+
+/**
+ * Async version using Postgres (preferred on serverless)
+ */
+export async function getSettingAsync(key: string, envKey?: string): Promise<string | null> {
+  try {
+    const row = await queryOne<{ value: string }>('SELECT value FROM settings WHERE key = $1', [key]);
+    if (row && row.value) {
+      return row.value;
+    }
+  } catch {
+    // ignore and fallback to env
+  }
+  if (envKey) {
+    return process.env[envKey] || null;
+  }
   return null;
 }
 
