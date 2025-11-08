@@ -1,0 +1,30 @@
+# Development Dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies including build tools for better-sqlite3
+RUN apk add --no-cache libc6-compat python3 make g++ sqlite-dev sqlite-libs
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install dependencies
+RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+# Copy application files
+COPY . .
+
+# Create data directory for SQLite database
+RUN mkdir -p /app/data
+
+# Expose port
+EXPOSE 3000
+
+# Set environment
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Start development server
+CMD ["npm", "run", "dev"]
+

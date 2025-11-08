@@ -89,10 +89,26 @@ Project ini menggunakan **SQLite file-based** yang **TIDAK kompatibel** dengan V
 
 **Solusi:**
 1. **Railway** atau **Render** (Recommended) - Mendukung persistent storage
-2. **Vercel + Supabase** - Migrate ke PostgreSQL
-3. **Vercel + Vercel Postgres** - Menggunakan database Vercel
+2. **Docker** (Recommended untuk VPS/Server) - Lihat `DOCKER.md`
+3. **Vercel + Supabase** - Migrate ke PostgreSQL
+4. **Vercel + Vercel Postgres** - Menggunakan database Vercel
 
 Lihat `DEPLOYMENT.md` untuk panduan lengkap deployment.
+
+### Docker Deployment
+
+Project ini sudah include Docker setup untuk development dan production.
+
+**Quick Start:**
+```bash
+# Development
+docker-compose up
+
+# Production
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+Lihat `DOCKER.md` untuk panduan lengkap Docker.
 
 ## Teknologi
 

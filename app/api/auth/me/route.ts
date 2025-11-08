@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import db from '@/lib/db';
+import { queryOne } from '@/lib/pgdb';
+
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const token = request.cookies.get('auth_token')?.value;
@@ -14,8 +16,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ user: null });
   }
 
-  // Get fresh user data from database including role
-  const dbUser = db.prepare('SELECT id, username, email, role FROM users WHERE id = ?').get(user.id) as any;
+  // Get fresh user data from Neon/Postgres including role
+  const dbUser = await queryOne<{ id: number; username: string; email: string | null; role: string }>(
+    'SELECT id, username, email, role FROM users WHERE id = $1',
+    [user.id]
+  );
   
   if (!dbUser) {
     return NextResponse.json({ user: null });

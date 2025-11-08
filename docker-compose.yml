@@ -1,0 +1,29 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: xuans-bridge-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code for hot reload
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+      # Mount data directory for SQLite persistence
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+      # Add your environment variables here or use .env file
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-in-production}
+      - LIXSTREAM_API_KEY=${LIXSTREAM_API_KEY:-}
+      - LIXSTREAM_API_URL=${LIXSTREAM_API_URL:-https://api.luxsioab.com/pub/api}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID:-}
+      - TELEGRAM_CHANNEL_NAME=${TELEGRAM_CHANNEL_NAME:-}
+    env_file:
+      - .env.local
+    restart: unless-stopped
+

@@ -9,6 +9,25 @@ Project ini saat ini menggunakan **SQLite file-based** yang **TIDAK kompatibel**
 
 ## Solusi untuk Deploy ke Vercel
 
+### Opsi 0: Neon (Postgres) dengan `pg` (Ringan & Cocok untuk Vercel)
+
+1. Buat akun dan database di Neon: https://neon.tech
+2. Ambil `DATABASE_URL` (gunakan opsi SSL, `sslmode=require`).
+3. Tambahkan variabel env di Vercel: `DATABASE_URL`.
+4. Di lokal, set `.env.local` dengan `DATABASE_URL`.
+5. Inisialisasi schema Postgres:
+```bash
+npm run init-pg
+```
+   Skrip ini akan membuat semua tabel dan user admin default.
+6. Jalankan util admin/reset (opsional):
+```bash
+npm run add-superuser-pg
+npm run reset-pg
+```
+
+Catatan: Kode saat ini masih memakai SQLite secara default. Untuk migrasi penuh, ubah akses database di route API ke Postgres secara bertahap (lihat `lib/pgdb.ts`).
+
 ### Opsi 1: Menggunakan Vercel Postgres (Recommended untuk Vercel)
 
 1. **Install Vercel Postgres:**
@@ -71,6 +90,7 @@ LIXSTREAM_API_URL=https://api.luxsioab.com/pub/api
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
 TELEGRAM_CHANNEL_ID=your-telegram-channel-id
 TELEGRAM_CHANNEL_NAME=your-telegram-channel-name
+DATABASE_URL=postgres://user:password@host:port/dbname?sslmode=require
 ```
 
 **Catatan:** Untuk production, semua API keys sebaiknya di-set melalui Settings page di aplikasi (superuser), bukan environment variables.
@@ -105,5 +125,5 @@ Untuk project ini, saya **sangat merekomendasikan** menggunakan **Railway** atau
 4. ✅ Auto-deploy dari GitHub
 5. ✅ Tidak perlu perubahan code
 
-Atau jika ingin tetap di Vercel, gunakan **Supabase** (gratis) sebagai database replacement.
+Atau jika ingin tetap di Vercel, gunakan **Neon (Postgres)** atau **Supabase** (gratis) sebagai database replacement.
 

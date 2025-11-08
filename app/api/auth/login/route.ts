@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import db from '@/lib/db';
-import { createToken, setAuthCookie, verifyToken } from '@/lib/auth';
+import { queryOne } from '@/lib/pgdb';
+import { createToken, setAuthCookie } from '@/lib/auth';
+
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,7 +16,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as any;
+    const user = await queryOne<any>(
+      'SELECT id, username, password, email, role FROM users WHERE username = $1',
+      [username]
+    );
 
     if (!user) {
       return NextResponse.json(
