@@ -117,7 +117,8 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Recursively delete folder and all its contents
-    const result = deleteFolderRecursive(folderIdNum, user.id, user.role);
+    const role = user.role || 'publisher';
+    const result = deleteFolderRecursive(folderIdNum, user.id, role);
 
     // If there were errors but some items were deleted, return partial success
     if (result.errors.length > 0 && (result.deletedFolders > 0 || result.deletedVideos > 0)) {
