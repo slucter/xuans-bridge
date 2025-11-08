@@ -53,7 +53,9 @@ export default function PostForm({ videos }: PostFormProps) {
         const allFolderIds = new Set<number>();
         const collectFolderIds = (folders: FolderWithVideos[]) => {
           folders.forEach((folder) => {
-            allFolderIds.add(folder.id);
+            if (folder.id !== null) {
+              allFolderIds.add(folder.id);
+            }
             if (folder.children) {
               collectFolderIds(folder.children as FolderWithVideos[]);
             }
@@ -72,7 +74,9 @@ export default function PostForm({ videos }: PostFormProps) {
       const allFolderIds = new Set<number>();
       const collectFolderIds = (folders: FolderWithVideos[]) => {
         folders.forEach((folder) => {
-          allFolderIds.add(folder.id);
+          if (folder.id !== null) {
+            allFolderIds.add(folder.id);
+          }
           if (folder.children) {
             collectFolderIds(folder.children as FolderWithVideos[]);
           }
@@ -533,7 +537,7 @@ function FolderTreeItem({
   onToggleVideo,
   searchQuery = '',
 }: FolderTreeItemProps) {
-  const isExpanded = expandedFolders.has(folder.id);
+  const isExpanded = folder.id !== null ? expandedFolders.has(folder.id) : false;
   const hasChildren = folder.children && folder.children.length > 0;
   const hasVideos = folder.videos && folder.videos.length > 0;
 
@@ -590,7 +594,11 @@ function FolderTreeItem({
         style={{ paddingLeft: `${level * 1.5 + 0.5}rem` }}
       >
         <button
-          onClick={() => onToggleFolder(folder.id)}
+          onClick={() => {
+            if (folder.id !== null) {
+              onToggleFolder(folder.id);
+            }
+          }}
           className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
           disabled={!hasChildren && !hasVideos}
         >
