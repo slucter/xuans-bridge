@@ -45,7 +45,9 @@ export async function POST(request: NextRequest) {
     });
 
     // Get video links from Postgres
-    const idPlaceholders = videoIdsNumbers.map((_, idx) => `$${idx + 1}`).join(',');
+    const idPlaceholders = videoIdsNumbers
+      .map((_id: number, idx: number) => `$${idx + 1}`)
+      .join(',');
     const queryParams = [...videoIdsNumbers, user.id];
     const videos = videoIdsNumbers.length > 0 ? await queryAll<any>(
       `SELECT id, name, file_share_link, file_embed_link 
@@ -57,7 +59,17 @@ export async function POST(request: NextRequest) {
     // Combine DB videos with extra links from client
     const videosForPosting = [
       ...videos,
-      ...extraLinks.map((l) => ({ id: null, name: 'Remote', file_share_link: l, file_embed_link: null })),
+      ...extraLinks.map((l) => {
+        const link = String(l);
+        const isEmbed = link.includes('/e/');
+        const isShare = link.includes('/s/');
+        return {
+          id: null,
+          name: 'Remote',
+          file_embed_link: isEmbed ? link : null,
+          file_share_link: isEmbed ? null : link,
+        };
+      }),
     ];
 
     if (videosForPosting.length === 0) {
@@ -149,7 +161,8 @@ async function postToTelegram(title: string, videos: any[], channelId: string, i
     throw new Error('Telegram channel ID is required. Please configure it in Settings.');
   }
 
-  const links = videos.map((v) => v.file_share_link || v.file_embed_link).filter(Boolean);
+  // Prefer embed links, fallback to share links
+  const links = videos.map((v) => v.file_embed_link || v.file_share_link).filter(Boolean);
   if (links.length === 0) {
     throw new Error('No video links available to post');
   }
