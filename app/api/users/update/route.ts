@@ -39,23 +39,30 @@ export async function PUT(request: NextRequest) {
     const values: any[] = [];
 
     if (role) {
-      updates.push('role = ?');
+      // push value first, then reference its index using $n syntax
       values.push(role);
+      updates.push(`role = $${values.length}`);
     }
 
     if (password) {
       const hashedPassword = await bcrypt.hash(password, 10);
-      updates.push('password = ?');
       values.push(hashedPassword);
+      updates.push(`password = $${values.length}`);
     }
 
     if (updates.length === 0) {
       return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
     }
 
-    values.push(id);
+    const idNum = typeof id === 'string' ? parseInt(id, 10) : id;
+    if (!idNum || Number.isNaN(idNum)) {
+      return NextResponse.json({ error: 'Invalid User ID' }, { status: 400 });
+    }
 
-    await execute(`UPDATE users SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
+    values.push(idNum);
+    const idParamIndex = values.length;
+
+    await execute(`UPDATE users SET ${updates.join(', ')} WHERE id = $${idParamIndex}`, values);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

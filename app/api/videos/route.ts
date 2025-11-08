@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { queryAll, queryOne, execute } from '@/lib/pgdb';
-import { createUploadTask, confirmUpload, getAllFilesFromLixstream } from '@/lib/lixstream';
+import { createUploadTask, confirmUpload, getAllFilesFromLixstream, getFilesByDirFromLixstream } from '@/lib/lixstream';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
+  console.log('[GET /api/videos] Start request');
   const token = request.cookies.get('auth_token')?.value;
 
   if (!token) {
@@ -29,13 +30,14 @@ export async function GET(request: NextRequest) {
   } else {
     folderId = undefined; // No folder filter
   }
+  console.log('[GET /api/videos] User role:', user.role, 'folderIdParam:', folderIdParam, 'resolved folderId:', folderId);
 
   // Superuser can see all videos from Lixstream API directly
   // Publisher only sees their own videos from local database
   let videos;
   if (user.role === 'superuser') {
-    // Fetch all files from Lixstream API
-    const lixstreamFiles = await getAllFilesFromLixstream();
+    // Fetch global files from Lixstream API (used to compute root files)
+    const globalFiles = await getAllFilesFromLixstream();
     
     // Get all folders to map dir_id to folder name and local folder_id
     const allFolders = await queryAll<any>('SELECT * FROM folders');
@@ -66,13 +68,13 @@ export async function GET(request: NextRequest) {
     console.log('=== END FOLDERS IN DATABASE ===\n');
     
     console.log('=== LIXSTREAM API RESPONSE (FILES) ===');
-    console.log(`Total files from Lixstream: ${lixstreamFiles.length}`);
+    console.log(`Total files from Lixstream (global): ${globalFiles.length}`);
     console.log('Sample files with dir_id:');
-    lixstreamFiles.filter(f => f.dir_id).slice(0, 10).forEach(file => {
+    globalFiles.filter(f => f.dir_id).slice(0, 10).forEach(file => {
       console.log(`  - Name: "${file.name || file.title}", dir_id: "${file.dir_id}", code: "${file.code}"`);
     });
     console.log('Sample files WITHOUT dir_id (root):');
-    lixstreamFiles.filter(f => !f.dir_id).slice(0, 5).forEach(file => {
+    globalFiles.filter(f => !f.dir_id).slice(0, 5).forEach(file => {
       console.log(`  - Name: "${file.name || file.title}", code: "${file.code}"`);
     });
     console.log('=== END LIXSTREAM API RESPONSE ===\n');
@@ -85,101 +87,73 @@ export async function GET(request: NextRequest) {
         .filter((id): id is string => id !== null && id !== undefined)
     );
 
-    // Build map from local videos by lixstream_file_id -> local folder info
-    const localFolderByFileId = new Map<string, { folder_id: number | null; folder_name: string | null; local_id?: number }>();
-    {
-      const rows = await queryAll<any>(
-        `SELECT v.id as local_id, v.lixstream_file_id, v.folder_id,
-                COALESCE(f.name, CASE WHEN v.folder_id IS NULL THEN 'Root' ELSE NULL END) AS folder_name
-         FROM videos v
-         LEFT JOIN folders f ON v.folder_id = f.id
-         WHERE v.lixstream_file_id IS NOT NULL`
-      );
-      for (const r of rows) {
-        if (r.lixstream_file_id) {
-          localFolderByFileId.set(r.lixstream_file_id, {
-            folder_id: r.folder_id ?? null,
-            folder_name: r.folder_name ?? null,
-            local_id: r.local_id,
-          });
-        }
+    // Fetch files per-folder and convert
+    const perFolderFiles: Array<{ folderId: number; folderName: string; dirId: string; files: any[] }> = [];
+    for (const f of allFolders) {
+      if (!f.lixstream_dir_id) continue;
+      try {
+        const files = await getFilesByDirFromLixstream(f.lixstream_dir_id);
+        perFolderFiles.push({ folderId: f.id, folderName: f.name, dirId: f.lixstream_dir_id, files });
+        console.log(`[Per-folder fetch] folder="${f.name}" (localId=${f.id}, dirId=${f.lixstream_dir_id}) -> files=${files.length}`);
+      } catch (err) {
+        console.warn(`[Per-folder fetch] Failed for folder "${f.name}" (dirId=${f.lixstream_dir_id}):`, err);
       }
     }
 
-    // Convert Lixstream files to Video format, excluding deleted videos
-    const videosFromLixstream = lixstreamFiles
-      .filter((file) => {
-        // Extract file code
-        const fileCode = file.code || 
-          (file.share_link ? file.share_link.match(/\/s\/([^\/\?]+)/)?.[1] : null) ||
-          (file.embed_link ? file.embed_link.match(/\/e\/([^\/\?]+)/)?.[1] : null);
-        
-        // Exclude if this file is marked as deleted
-        if (fileCode && deletedVideoIds.has(fileCode)) {
-          return false;
-        }
-        return true;
-      })
-      .map((file) => {
-      // Extract file code from share_link or embed_link if code is not available
-      const fileCode = file.code || 
-        (file.share_link ? file.share_link.match(/\/s\/([^\/\?]+)/)?.[1] : null) ||
-        (file.embed_link ? file.embed_link.match(/\/e\/([^\/\?]+)/)?.[1] : null);
-
-      // Get folder info from maps (with normalized matching)
-      let folderName: string | null = null;
-      let localFolderId: number | null = null;
-      
-      if (file.dir_id) {
-        const normalizedDirId = normalizeDirId(file.dir_id);
-        if (normalizedDirId) {
-          folderName = folderMapByName.get(normalizedDirId) || null;
-          localFolderId = folderMapById.get(normalizedDirId) || null;
-        }
-        
-        // Log if folder not found - this is important for debugging
-        if (!folderName || !localFolderId) {
-          console.warn(`❌ File "${file.name || file.title}" has dir_id "${file.dir_id}" (normalized: "${normalizedDirId}") but folder not found in local database`);
-          console.warn(`Available folders in map:`, Array.from(folderMapByName.entries()).map(([dirId, name]) => ({ dirId, name })));
-          // Important: if dir_id exists but we can't map to local DB, set a placeholder name
-          // This prevents UI from showing it as Root despite having a folder on Lixstream
-          folderName = '(Unmapped Folder)';
-          // Keep localFolderId as null since we don't have a local folder record
-        } else {
-          console.log(`✓ Matched file "${file.name || file.title}" to folder "${folderName}" (dir_id: ${file.dir_id}, local_folder_id: ${localFolderId})`);
-        }
-      } else {
-        // Only set to Root if file has no dir_id (truly in root)
-        folderName = 'Root';
+    const codesInKnownFolders = new Set<string>();
+    for (const pf of perFolderFiles) {
+      for (const raw of pf.files) {
+        const code = raw?.code || (raw?.share_link ? raw.share_link.match(/\/s\/([^\/\?]+)/)?.[1] : null) || (raw?.embed_link ? raw.embed_link.match(/\/e\/([^\/\?]+)/)?.[1] : null);
+        if (code) codesInKnownFolders.add(code);
       }
+    }
 
-      // Fallback to local DB mapping when dir_id is missing or unmapped
-      if ((!localFolderId || !folderName) && fileCode) {
-        const local = localFolderByFileId.get(fileCode);
-        if (local) {
-          localFolderId = local.folder_id;
-          folderName = local.folder_name;
-        }
+    // deletedVideoIds already computed above; avoid redeclaration
+
+    const videosFromFolders: any[] = [];
+    for (const pf of perFolderFiles) {
+      for (const file of pf.files) {
+        const fileCode = file?.code || (file?.share_link ? file.share_link.match(/\/s\/([^\/\?]+)/)?.[1] : null) || (file?.embed_link ? file.embed_link.match(/\/e\/([^\/\?]+)/)?.[1] : null);
+        if (fileCode && deletedVideoIds.has(fileCode)) continue;
+        videosFromFolders.push({
+          id: fileCode || `lixstream-${Date.now()}-${Math.random()}`,
+          name: file.name || file.title || 'Unknown',
+          folder_id: pf.folderId,
+          folder_name: pf.folderName,
+          lixstream_file_id: fileCode,
+          file_share_link: file.share_link || null,
+          file_embed_link: file.embed_link || null,
+          thumbnail_url: file.thumbnail || null,
+          upload_status: 'completed',
+          user_id: null,
+          created_at: new Date().toISOString(),
+        });
       }
+    }
 
-      // Prefer local numeric id if exists
-      const localMap = fileCode ? localFolderByFileId.get(fileCode) : undefined;
-      const idVal = (localMap?.local_id ?? null) ?? (fileCode || `lixstream-${Date.now()}-${Math.random()}`);
-
-      return {
-        id: idVal as any,
+    // Root files = global files not in known folders
+    const videosFromRoot: any[] = [];
+    for (const file of globalFiles) {
+      const fileCode = file.code || (file.share_link ? file.share_link.match(/\/s\/([^\/\?]+)/)?.[1] : null) || (file.embed_link ? file.embed_link.match(/\/e\/([^\/\?]+)/)?.[1] : null);
+      if (!fileCode) continue;
+      if (codesInKnownFolders.has(fileCode)) continue;
+      if (deletedVideoIds.has(fileCode)) continue;
+      videosFromRoot.push({
+        id: fileCode || `lixstream-${Date.now()}-${Math.random()}`,
         name: file.name || file.title || 'Unknown',
-        folder_id: localFolderId,
-        folder_name: folderName,
+        folder_id: null,
+        folder_name: 'Root',
         lixstream_file_id: fileCode,
         file_share_link: file.share_link || null,
         file_embed_link: file.embed_link || null,
         thumbnail_url: file.thumbnail || null,
-        upload_status: 'completed', // All files from Lixstream are completed
-        user_id: null, // Not applicable for superuser view
-        created_at: new Date().toISOString(), // Use current time as fallback
-      };
-    });
+        upload_status: 'completed',
+        user_id: null,
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    console.log(`[Aggregate] per-folder videos=${videosFromFolders.length}, root videos=${videosFromRoot.length}`);
 
     // Also get videos from local database (for recently uploaded videos that may not appear in Lixstream API yet)
     let localVideos: any[] = [];
@@ -210,7 +184,7 @@ export async function GET(request: NextRequest) {
 
     // Create a Set of lixstream_file_id from Lixstream API to avoid duplicates
     const lixstreamFileIds = new Set(
-      videosFromLixstream
+      [...videosFromFolders, ...videosFromRoot]
         .map((v) => v.lixstream_file_id)
         .filter((id): id is string => id !== null && id !== undefined)
     );
@@ -247,28 +221,19 @@ export async function GET(request: NextRequest) {
     }));
 
     // Combine videos from Lixstream API and local database
-    videos = [...videosFromLixstream, ...localVideosFormatted];
+    videos = [...videosFromFolders, ...videosFromRoot, ...localVideosFormatted];
+    console.log(`[Combine] Lixstream per-folder: ${videosFromFolders.length}, root: ${videosFromRoot.length}, local videos (filtered): ${localVideosFiltered.length}, combined: ${videos.length}`);
 
     // Filter by folder if specified
     if (folderId === null) {
-      // Root folder: only files with no dir_id (no folder in Lixstream) OR folder_id is null
-      videos = videos.filter((v) => {
-        // For videos from Lixstream, check if they have no dir_id
-        if (v.lixstream_file_id && lixstreamFileIds.has(v.lixstream_file_id)) {
-          const file = lixstreamFiles.find((f) => {
-            const fileCode = f.code || 
-              (f.share_link ? f.share_link.match(/\/s\/([^\/\?]+)/)?.[1] : null) ||
-              (f.embed_link ? f.embed_link.match(/\/e\/([^\/\?]+)/)?.[1] : null);
-            return fileCode === v.lixstream_file_id;
-          });
-          return !file?.dir_id && v.folder_name === 'Root';
-        }
-        // For local videos, check if folder_id is null
-        return v.folder_id === null;
-      });
+      const beforeCount = videos.length;
+      videos = videos.filter((v) => v.folder_id === null);
+      console.log(`[Filter Root] before=${beforeCount}, after=${videos.length}`);
     } else if (folderId !== undefined) {
       // Specific folder: filter by local folder_id
+      const beforeCount = videos.length;
       videos = videos.filter((v) => v.folder_id === folderId);
+      console.log(`[Filter Folder=${folderId}] before=${beforeCount}, after=${videos.length}`);
     }
     // If folderId is undefined, show all videos (already done)
 
@@ -276,6 +241,7 @@ export async function GET(request: NextRequest) {
     videos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   } else {
     // Publisher: see their own videos from database + shared videos from Lixstream
+    console.log('[GET /api/videos] Publisher flow');
     // First, get their own videos from database
     let ownVideos: any[] = [];
     if (folderId === null) {
@@ -376,6 +342,7 @@ export async function GET(request: NextRequest) {
 
       // Combine own videos and shared videos
       videos = [...ownVideos, ...filteredSharedVideos];
+      console.log(`[Combine Publisher] own=${ownVideos.length}, shared=${filteredSharedVideos.length}, combined=${videos.length}`);
       
       // Sort by created_at descending
       videos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -384,6 +351,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  console.log('[GET /api/videos] End request, total videos:', Array.isArray(videos) ? videos.length : 0);
   return NextResponse.json({ videos });
 }
 

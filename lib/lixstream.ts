@@ -284,7 +284,7 @@ export async function getAllFilesFromLixstream(): Promise<LixstreamFile[]> {
       }
       
       // Normalize file shape to ensure dir_id and code are consistently available
-      const normalized = files.map((raw: any) => {
+      const normalized = files.map((raw: any, idx: number) => {
         // Extract/normalize dir_id from possible variant keys
         const rawDirId =
           raw?.dir_id ??
@@ -311,6 +311,11 @@ export async function getAllFilesFromLixstream(): Promise<LixstreamFile[]> {
           if (m) code = m[1];
         }
 
+        // Debug: show normalization result for first few items of first page
+        if (pageNum === 1 && idx < 5) {
+          console.log('[Lixstream normalize] name=', raw?.name || raw?.title, 'raw.dir_id=', rawDirId, 'normalized.dir_id=', dir_id, 'raw.code=', raw?.code, 'derived.code=', code);
+        }
+
         return {
           ...raw,
           code,
@@ -323,6 +328,7 @@ export async function getAllFilesFromLixstream(): Promise<LixstreamFile[]> {
       // Check if there are more pages
       const totalElements = response.data.data?.total_elements || response.data.data?.total || 0;
       const totalPages = response.data.data?.total_pages || Math.ceil(totalElements / pageSize);
+      console.log(`[Lixstream pagination] page=${pageNum}, pageSize=${pageSize}, totalElements=${totalElements}, totalPages=${totalPages}, receivedFiles=${files.length}`);
       
       if (pageNum >= totalPages || files.length < pageSize) {
         break; // All files fetched
@@ -337,5 +343,99 @@ export async function getAllFilesFromLixstream(): Promise<LixstreamFile[]> {
     }
   }
   
+  return allFiles;
+}
+
+// Get files from Lixstream under a specific directory (paginated)
+export async function getFilesByDirFromLixstream(dirId: string): Promise<LixstreamFile[]> {
+  const LIXSTREAM_API_URL = await getLixstreamApiUrl();
+  const LIXSTREAM_API_KEY = await getLixstreamApiKey();
+
+  const allFiles: LixstreamFile[] = [];
+  let pageNum = 1;
+  const pageSize = 100; // Maximum page size
+
+  while (true) {
+    try {
+      const response = await axios.post(
+        `${LIXSTREAM_API_URL}/file/page`,
+        {
+          key: LIXSTREAM_API_KEY,
+          page_num: pageNum,
+          page_size: pageSize,
+          dir_id: dirId,
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.data.code !== 200) {
+        throw new Error(response.data.msg || 'Failed to fetch directory files from Lixstream');
+      }
+
+      const files = response.data.data?.files || [];
+      if (files.length === 0) {
+        break; // No more files
+      }
+
+      // Normalize file shape to ensure dir_id and code are consistently available
+      const normalized = files.map((raw: any, idx: number) => {
+        const rawDirId =
+          raw?.dir_id ??
+          raw?.dirId ??
+          raw?.dirID ??
+          raw?.directory_id ??
+          raw?.dir_code ??
+          raw?.dirCode ??
+          raw?.dir_id_str ??
+          raw?.dirIdStr ??
+          raw?.parent_dir_id ??
+          raw?.parentId;
+
+        const dir_id = rawDirId != null && rawDirId !== '' ? String(rawDirId) : dirId;
+
+        let code: string | undefined = raw?.code;
+        if (!code && typeof raw?.share_link === 'string') {
+          const m = raw.share_link.match(/\/s\/([^\/\?]+)/);
+          if (m) code = m[1];
+        }
+        if (!code && typeof raw?.embed_link === 'string') {
+          const m = raw.embed_link.match(/\/e\/([^\/\?]+)/);
+          if (m) code = m[1];
+        }
+
+        if (pageNum === 1 && idx < 3) {
+          console.log('[Lixstream per-dir normalize] dirId=', dirId, 'name=', raw?.name || raw?.title, 'raw.dir_id=', rawDirId, 'normalized.dir_id=', dir_id, 'code=', code);
+        }
+
+        return {
+          ...raw,
+          code,
+          dir_id,
+        } as LixstreamFile;
+      });
+
+      allFiles.push(...normalized);
+
+      const totalElements = response.data.data?.total_elements || response.data.data?.total || 0;
+      const totalPages = response.data.data?.total_pages || Math.ceil(totalElements / pageSize);
+      console.log(`[Lixstream per-dir pagination] dirId=${dirId}, page=${pageNum}, pageSize=${pageSize}, totalElements=${totalElements}, totalPages=${totalPages}, receivedFiles=${files.length}`);
+
+      if (pageNum >= totalPages || files.length < pageSize) {
+        break; // All files fetched
+      }
+
+      pageNum++;
+    } catch (error: any) {
+      if (error.response?.data) {
+        throw new Error(error.response.data.msg || error.response.data.error || 'Failed to fetch directory files from Lixstream');
+      }
+      throw error;
+    }
+  }
+
   return allFiles;
 }

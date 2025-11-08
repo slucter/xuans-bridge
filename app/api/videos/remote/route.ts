@@ -6,6 +6,7 @@ import { remoteUpload } from '@/lib/lixstream';
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
+  console.log('[POST /api/videos/remote] Start request');
   const token = request.cookies.get('auth_token')?.value;
 
   if (!token) {
@@ -26,7 +27,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { url, name, folder_id } = await request.json();
+    const body = await request.json();
+    const { url, name, folder_id } = body;
+    console.log('[POST /api/videos/remote] Incoming body:', JSON.stringify(body));
 
     if (!url || !name) {
       return NextResponse.json(
@@ -77,13 +80,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(`Remote upload: folder_id=${folder_id}, lixstreamDirId=${lixstreamDirId || 'null (root)'}`);
+    console.log(`[POST /api/videos/remote] Resolved folder_id=${folder_id}, localFolderId=${localFolderId}, lixstreamDirId=${lixstreamDirId || 'null (root)'}`);
 
     // Call Lixstream remote upload API
     const remoteUploadResponse = await remoteUpload(url, name, lixstreamDirId);
 
     // Log response for debugging
-    console.log('Remote upload response:', JSON.stringify(remoteUploadResponse, null, 2));
+    console.log('[POST /api/videos/remote] Remote upload response:', JSON.stringify(remoteUploadResponse, null, 2));
 
     // Check if response is valid
     if (!remoteUploadResponse || !remoteUploadResponse.data) {
@@ -118,7 +121,7 @@ export async function POST(request: NextRequest) {
       dirShareLink: remoteUploadResponse.data.dir_share_link || null,
     });
   } catch (error: any) {
-    console.error('Remote upload error:', error);
+    console.error('[POST /api/videos/remote] Remote upload error:', error);
     return NextResponse.json(
       { error: error.message || 'Failed to create remote upload task' },
       { status: 500 }
