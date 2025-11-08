@@ -41,7 +41,21 @@ export async function queryOne<T = any>(sql: string, params: any[] = []): Promis
 
 export async function execute(sql: string, params: any[] = []): Promise<{ rowCount: number } & Record<string, any>> {
   const isInsert = /^\s*insert\s+/i.test(sql);
-  const needsReturning = isInsert && !/returning\s+/i.test(sql);
+  // Determine target table for INSERT
+  const tableMatch = sql.match(/insert\s+into\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+  const tableName = tableMatch ? tableMatch[1].toLowerCase() : undefined;
+  // Only append RETURNING id for tables known to have an 'id' column
+  const tablesWithId = new Set([
+    'users',
+    'folders',
+    'videos',
+    'posts',
+    'video_shares',
+    'folder_shares',
+    'deleted_videos',
+  ]);
+  const canReturnId = tableName ? tablesWithId.has(tableName) : false;
+  const needsReturning = isInsert && !/returning\s+/i.test(sql) && canReturnId;
   const finalSql = needsReturning ? `${sql} RETURNING id` : sql;
   const res = await pool.query(finalSql, params);
   const ret: any = { rowCount: res.rowCount };
